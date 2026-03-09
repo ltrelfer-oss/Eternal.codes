@@ -216,8 +216,14 @@ public:
 		// check bounds [ 0, sv_maxunlag ]
 		math::clamp( correct, 0.f, g_csgo.sv_maxunlag->GetFloat( ) );
 
+		// scale tolerance with latency to handle high-ping network jitter.
+		// at low ping this stays close to the default 0.2s deadtime.
+		// at high ping the extra tolerance accounts for timing variance.
+		float tolerance = 0.2f + (g_cl.m_latency + in) * 0.15f;
+		math::clamp( tolerance, 0.2f, 0.3f );
+
 		// calculate difference between tick sent by player and our latency based tick.
 		// ensure this record isn't too old.
-		return std::abs( correct - ( curtime - m_sim_time ) ) < 0.19f;
+		return std::abs( correct - ( curtime - m_sim_time ) ) < tolerance;
 	}
 };

@@ -588,20 +588,36 @@ void Aimbot::find() {
 			}
 
 			LagRecord* last = g_resolver.FindLastRecord(t);
-			if (!last || last == ideal)
-				continue;
+			if (last && last != ideal) {
+				t->SetupHitboxes(last, true);
+				if (!t->m_hitboxes.empty()) {
+					// rip something went wrong..
+					if (t->GetBestAimPosition(tmp_pos, tmp_damage, last) && SelectTarget(last, tmp_pos, tmp_damage)) {
+						// if we made it so far, set shit.
+						best.player = t->m_player;
+						best.pos = tmp_pos;
+						best.damage = tmp_damage;
+						best.record = last;
+					}
+				}
+			}
 
-			t->SetupHitboxes(last, true);
-			if (t->m_hitboxes.empty())
-				continue;
-
-			// rip something went wrong..
-			if (t->GetBestAimPosition(tmp_pos, tmp_damage, last) && SelectTarget(last, tmp_pos, tmp_damage)) {
-				// if we made it so far, set shit.
-				best.player = t->m_player;
-				best.pos = tmp_pos;
-				best.damage = tmp_damage;
-				best.record = last;
+			// on high ping, also try the most recent record as an additional candidate.
+			// the front record has the freshest positional data and may yield better
+			// results when the ideal/last records are stale due to latency.
+			if (g_cl.m_latency > 0.08f) {
+				LagRecord* front = t->m_records.front().get();
+				if (front && front != ideal && front != last && front->valid() && !front->immune() && !front->dormant()) {
+					t->SetupHitboxes(front, false);
+					if (!t->m_hitboxes.empty()) {
+						if (t->GetBestAimPosition(tmp_pos, tmp_damage, front) && SelectTarget(front, tmp_pos, tmp_damage)) {
+							best.player = t->m_player;
+							best.pos = tmp_pos;
+							best.damage = tmp_damage;
+							best.record = front;
+						}
+					}
+				}
 			}
 		}
 	}

@@ -95,9 +95,31 @@ bool LagCompensation::StartPrediction(AimPlayer* data) {
 
 		// compute the direction change per tick.
 		change = (math::NormalizedAngle(dir - prevdir) / dt) * g_csgo.m_globals->m_interval;
+
+		// on high ping, use a weighted average of direction changes from additional records
+		// to get a more robust estimate and reduce prediction jitter.
+		if (size > 2 && g_cl.m_latency > 0.08f) {
+			float prevdir2 = 0.f;
+			if (data->m_records[2]->m_velocity.y != 0.f || data->m_records[2]->m_velocity.x != 0.f)
+				prevdir2 = math::rad_to_deg(std::atan2(data->m_records[2]->m_velocity.y, data->m_records[2]->m_velocity.x));
+
+			float dt2 = data->m_records[1]->m_sim_time - data->m_records[2]->m_sim_time;
+			if (dt2 > 0.f) {
+				float change2 = (math::NormalizedAngle(prevdir - prevdir2) / dt2) * g_csgo.m_globals->m_interval;
+
+				// weighted average: favor the more recent change (70/30).
+				change = change * 0.7f + change2 * 0.3f;
+			}
+		}
 	}
 
-	if (std::abs(change) > 6.f)
+	// scale direction change threshold with latency.
+	// on high ping, position updates arrive less frequently, causing
+	// the apparent direction change between records to appear larger.
+	float max_change = 6.f + g_cl.m_latency * 8.f;
+	math::clamp(max_change, 6.f, 15.f);
+
+	if (std::abs(change) > max_change)
 		change = 0.f;
 
 	// get the pointer to the players animation state.
