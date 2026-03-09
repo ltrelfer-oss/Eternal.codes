@@ -19,6 +19,17 @@ public:
 	}
 };
 
+struct DamageRecord_t {
+	float m_time;
+	float m_damage;
+	float m_yaw;
+};
+
+struct AngleRecord_t {
+	float m_time;
+	float m_yaw;
+};
+
 enum AntiAimMode : size_t {
 	STAND = 0,
 	WALK,
@@ -49,10 +60,17 @@ public:
 	float  m_auto_last;
 	float  m_view;
 
+	std::deque< DamageRecord_t > m_damage_records;
+	std::deque< AngleRecord_t >  m_hit_history;
+	bool   m_has_smoothed_yaw;
+	float  m_smoothed_yaw;
+
 public:
 	void IdealPitch( );
 	void AntiAimPitch( );
 	void AutoDirection( );
+	void ResetAutoDirectionData( );
+	void RecordDamage( float damage, float yaw );
 	void GetAntiAimDirection( );
     bool DoEdgeAntiAim( Player *player, ang_t &out );
 	void DoRealAntiAim( );
