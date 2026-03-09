@@ -4,6 +4,7 @@
 class Element;
 class Tab;
 class Form;
+namespace MenuLib { class MenuElement; }
 
 enum ElementFlags : size_t {
 	NONE      = 0 << 0,
@@ -35,10 +36,11 @@ class Element {
 	friend class Tab;
 	friend class Form;
 	friend class Config;
+	friend class MenuLib::MenuElement;
 
 protected:
 	using ShowCallback_t = bool( *)( );
-	using Callback_t = void( *)( );
+	using Callback_t = std::function< void( ) >;
 
 protected:
 	Point                         m_pos;
