@@ -168,9 +168,35 @@ void Shots::OnImpact( IGameEvent *evt ) {
 	// intersect our historical matrix with the path the shot took.
 	g_csgo.m_engine_trace->ClipRayToEntity( Ray( start, end ), MASK_SHOT, target, &trace );
 
+	// also check if the server impact landed near the player's backtracked position.
+	// if the impact is close to the player but didn't register a hit, it's likely
+	// a resolver miss rather than spread.
+	float impact_dist = ( pos - shot->m_record->m_pred_origin ).length( );
+	bool impact_near_player = impact_dist < 128.f;
+
 	// we did not hit jackshit, or someone else.
-	if ( !trace.m_entity || !trace.m_entity->IsPlayer( ) || trace.m_entity != target )
-		g_notify.add( XOR( "shot missed due to spread\n" ) );
+	if ( !trace.m_entity || !trace.m_entity->IsPlayer( ) || trace.m_entity != target ) {
+		if ( impact_near_player ) {
+			// impact landed near the player but the trace against our resolved matrix missed.
+			// this strongly suggests the resolver had the wrong angle, not spread.
+			size_t mode = shot->m_record->m_mode;
+
+			if ( mode == Resolver::Modes::RESOLVE_BODY )
+				++data->m_body_index;
+
+			else if ( mode == Resolver::Modes::RESOLVE_STAND1 )
+				++data->m_stand_index;
+
+			else if ( mode == Resolver::Modes::RESOLVE_STAND2 )
+				++data->m_stand_index2;
+
+			++data->m_missed_shots;
+			g_notify.add( XOR( "shot missed due to resolver\n" ) );
+		}
+		else {
+			g_notify.add( XOR( "shot missed due to spread\n" ) );
+		}
+	}
 
 	// we should have 100% hit this player..
 	// this is a miss due to wrong angles.
@@ -182,7 +208,7 @@ void Shots::OnImpact( IGameEvent *evt ) {
 		if ( mode == Resolver::Modes::RESOLVE_BODY )
 			++data->m_body_index;
 
-		else if ( mode == Resolver::Modes::RESOLVE_STAND )
+		else if ( mode == Resolver::Modes::RESOLVE_STAND || mode == Resolver::Modes::RESOLVE_STAND1 )
 			++data->m_stand_index;
 
 		else if ( mode == Resolver::Modes::RESOLVE_STAND2 )
@@ -321,7 +347,7 @@ void Shots::OnHurt( IGameEvent *evt ) {
 	if ( mode == Resolver::Modes::RESOLVE_BODY && data->m_body_index > 0 )
 		--data->m_body_index;
 
-	else if ( mode == Resolver::Modes::RESOLVE_STAND && data->m_stand_index > 0 )
+	else if ( ( mode == Resolver::Modes::RESOLVE_STAND || mode == Resolver::Modes::RESOLVE_STAND1 ) && data->m_stand_index > 0 )
 		--data->m_stand_index;
 
 	else if ( mode == Resolver::Modes::RESOLVE_STAND2 && data->m_stand_index2 > 0 )

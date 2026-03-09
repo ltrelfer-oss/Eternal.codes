@@ -436,12 +436,41 @@ void Movement::AutoPeek( ) {
 }
 
 void Movement::QuickStop( ) {
+	// only stop when on ground.
+	if( !( g_cl.m_flags & FL_ONGROUND ) )
+		return;
+
+	// get current speed.
+	float speed = g_cl.m_local->m_vecVelocity( ).length_2d( );
+
+	// use the engine's stop-speed threshold.
+	// below this speed, friction bleeds velocity to zero almost instantly.
+	float stopspeed = g_csgo.sv_stopspeed->GetFloat( );
+
+	if( speed <= stopspeed ) {
+		g_cl.m_cmd->m_forward_move = 0.f;
+		g_cl.m_cmd->m_side_move = 0.f;
+		return;
+	}
+
+	// predict how much speed friction will remove this tick.
+	// reference: source-sdk-2013 gamemovement.cpp Friction()
+	float friction = g_csgo.sv_friction->GetFloat( ) * g_cl.m_local->m_surfaceFriction( );
+	float control  = std::max( speed, stopspeed );
+	float drop     = control * friction * g_csgo.m_globals->m_interval;
+
+	// compute the velocity we need to counteract after friction.
+	// if friction alone will stop us, just zero the movement.
+	float remaining = speed - drop;
+	if( remaining <= 0.f ) {
+		g_cl.m_cmd->m_forward_move = 0.f;
+		g_cl.m_cmd->m_side_move = 0.f;
+		return;
+	}
+
 	// convert velocity to angular momentum.
 	ang_t angle;
 	math::VectorAngles( g_cl.m_local->m_vecVelocity( ), angle );
-
-	// get our current speed of travel.
-	float speed = g_cl.m_local->m_vecVelocity( ).length( );
 
 	// fix direction by factoring in where we are looking.
 	angle.y = g_cl.m_view_angles.y - angle.y;
@@ -450,16 +479,12 @@ void Movement::QuickStop( ) {
 	vec3_t direction;
 	math::AngleVectors( angle, &direction );
 
-	vec3_t stop = direction * -speed;
+	// apply opposing force scaled to the remaining speed after friction.
+	vec3_t stop = direction * -remaining;
 
-	if( g_cl.m_speed > 13.f ) {
-		g_cl.m_cmd->m_forward_move = stop.x;
-		g_cl.m_cmd->m_side_move = stop.y;
-	}
-	else {
-		g_cl.m_cmd->m_forward_move = 0.f;
-		g_cl.m_cmd->m_side_move = 0.f;
-	}
+	// clamp to engine move limits.
+	g_cl.m_cmd->m_forward_move = std::max( -450.f, std::min( 450.f, stop.x ) );
+	g_cl.m_cmd->m_side_move    = std::max( -450.f, std::min( 450.f, stop.y ) );
 }
 
 void Movement::FakeWalk( ) {
