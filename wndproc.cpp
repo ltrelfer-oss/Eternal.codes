@@ -57,14 +57,14 @@ LRESULT WINAPI Hooks::WndProc( HWND wnd, uint32_t msg, WPARAM wp, LPARAM lp ) {
 		break;
 
 	case WM_SYSKEYDOWN:
-		if( wp == VK_MENU )
-			g_input.SetDown( VK_MENU );
+		if( ( size_t )wp < g_input.m_keys.size( ) )
+			g_input.SetDown( wp );
 
 		break;
 
 	case WM_SYSKEYUP:
-		if( wp == VK_MENU )
-			g_input.SetUp( VK_MENU );
+		if( ( size_t )wp < g_input.m_keys.size( ) )
+			g_input.SetUp( wp );
 
 		break;
 
