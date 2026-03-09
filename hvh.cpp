@@ -550,14 +550,17 @@ void HVH::DoFakeAntiAim( ) {
 
 	switch( g_menu.main.antiaim.fake_yaw.get( ) ) {
 
-		// default.
-	case 1:
-		// set base to opposite of direction.
-		g_cl.m_cmd->m_view_angles.y = m_direction + 180.f;
+		// default – adaptive fakeyaw system.
+	case 1: {
+		// Run the adaptive controller for this tick.
+		g_adaptive_fakeyaw.Update( m_direction );
 
-		// apply 45 degree jitter.
-		g_cl.m_cmd->m_view_angles.y += g_csgo.RandomFloat( -90.f, 90.f );
+		// Apply: direction + blended preset offset + distortion layer.
+		g_cl.m_cmd->m_view_angles.y = m_direction
+		    + g_adaptive_fakeyaw.blendedMovementOffset
+		    + g_adaptive_fakeyaw.distortionOffset;
 		break;
+	}
 
 		// relative.
 	case 2:
