@@ -199,12 +199,94 @@ void Resolver::ResolveWalk( AimPlayer* data, LagRecord* record ) {
 	std::memcpy( &data->m_walk_record, record, sizeof( LagRecord ) );
 }
 
+void Resolver::ResolveAnimations( AimPlayer* data, LagRecord* record ) {
+	// need at least 2 records to compare animation layer deltas.
+	if( data->m_records.size( ) < 2 )
+		return;
+
+	LagRecord* previous = data->m_records[ 1 ].get( );
+	if( !previous || previous->dormant( ) )
+		return;
+
+	// reset per-tick animation resolve state.
+	data->m_anim_resolved = false;
+
+	// --- layer 3 analysis: body lean / idle turn adjustment ---
+	// this layer drives body rotation while standing.
+	// activity 979 = ACT_CSGO_IDLE_TURN_BALANCEADJUST (body actively rotating)
+	// activity 980 = ACT_CSGO_IDLE_ADJUST_STOPPEDMOVING (just stopped)
+	C_AnimationLayer* layer3      = &record->m_layers[ 3 ];
+	C_AnimationLayer* prev_layer3 = &previous->m_layers[ 3 ];
+
+	int act = data->m_player->GetSequenceActivity( layer3->m_sequence );
+
+	if( act == 979 && layer3->m_weight > 0.f ) {
+		// body is actively adjusting while standing.
+		// the cycle progression direction indicates which way the body is turning.
+		if( layer3->m_cycle != prev_layer3->m_cycle ) {
+			float cycle_delta = layer3->m_cycle - prev_layer3->m_cycle;
+
+			// handle cycle wrap-around (0.0 to 1.0).
+			if( cycle_delta > 0.5f )
+				cycle_delta -= 1.f;
+			else if( cycle_delta < -0.5f )
+				cycle_delta += 1.f;
+
+			if( std::abs( cycle_delta ) > 0.01f ) {
+				data->m_desync_side   = ( cycle_delta > 0.f ) ? 1 : -1;
+				data->m_anim_resolved = true;
+			}
+		}
+
+		// weight just appeared (was near-zero, now significant) -> desync started.
+		if( prev_layer3->m_weight < 0.01f && layer3->m_weight > 0.1f )
+			data->m_anim_resolved = true;
+	}
+
+	// --- LBY update detection via layer weight snap ---
+	// when the server forces an LBY update, layer 3 weight typically
+	// drops sharply as the body snaps to the new target angle.
+	if( prev_layer3->m_weight > 0.5f && layer3->m_weight < 0.1f ) {
+		data->m_last_lby_time = record->m_anim_time;
+		data->m_resolved_yaw  = record->m_body;
+		data->m_anim_resolved = true;
+	}
+
+	// --- body yaw delta detection ---
+	// significant LBY change between consecutive records is a strong signal
+	// that the server forced a body update.
+	float body_delta = math::NormalizedAngle( record->m_body - previous->m_body );
+	if( std::abs( body_delta ) > 35.f ) {
+		data->m_last_lby_time = record->m_anim_time;
+		data->m_resolved_yaw  = record->m_body;
+		data->m_anim_resolved = true;
+	}
+
+	// --- layer 12 cross-reference: whole body rotation ---
+	// cross-check layer 12 weight delta with our layer 3 finding.
+	// if they disagree, reduce confidence in the detected side.
+	C_AnimationLayer* layer12      = &record->m_layers[ 12 ];
+	C_AnimationLayer* prev_layer12 = &previous->m_layers[ 12 ];
+
+	if( data->m_desync_side != 0 && layer12->m_weight > 0.f && prev_layer12->m_weight > 0.f ) {
+		float w_delta = layer12->m_weight - prev_layer12->m_weight;
+		if( std::abs( w_delta ) > 0.01f ) {
+			int cross_side = ( w_delta > 0.f ) ? 1 : -1;
+			if( cross_side != data->m_desync_side )
+				data->m_desync_side = 0;
+		}
+	}
+}
+
 void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 	// for no-spread call a seperate resolver.
 	if( g_menu.main.config.mode.get( ) == 1 ) {
 		StandNS( data, record );
 		return;
 	}
+
+	// run animation layer analysis for desync detection.
+	ResolveAnimations( data, record );
 
 	// get predicted away angle for the player.
 	float away = GetAwayAngle( record );
@@ -242,6 +324,15 @@ void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 
 		// LBY SHOULD HAVE UPDATED HERE.
 		else if( record->m_anim_time >= data->m_body_update ) {
+			// animation resolver detected a recent LBY update from layer analysis.
+			// trust it if it happened within the current update window.
+			if( data->m_anim_resolved && data->m_last_lby_time >= record->m_anim_time - 0.22f ) {
+				record->m_eye_angles.y = data->m_resolved_yaw;
+				data->m_body_update    = record->m_anim_time + 1.1f;
+				record->m_mode         = Modes::RESOLVE_BODY;
+				return;
+			}
+
 			// only shoot the LBY flick 3 times.
 			// if we happen to miss then we most likely mispredicted.
 			if( data->m_body_index <= 3 ) {
@@ -259,6 +350,19 @@ void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 
 			// set to stand1 -> known last move.
 			record->m_mode = Modes::RESOLVE_STAND1;
+
+			// animation resolver has a desync direction, use it.
+			if( data->m_anim_resolved && data->m_desync_side != 0 ) {
+				// max desync offset clamped by the engine (~58 degrees).
+				float desync_offset = 58.f * data->m_desync_side;
+				record->m_eye_angles.y = move->m_body + desync_offset;
+
+				// after enough misses, flip to the other side.
+				if( data->m_stand_index > 3 )
+					record->m_eye_angles.y = move->m_body - desync_offset;
+
+				return;
+			}
 
 			C_AnimationLayer* curr = &record->m_layers[ 3 ];
 			int act = data->m_player->GetSequenceActivity( curr->m_sequence );
@@ -289,6 +393,29 @@ void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 	// stand2 -> no known last move.
 	record->m_mode = Modes::RESOLVE_STAND2;
 
+	// animation resolver detected desync side, use it for better angle selection.
+	if( data->m_anim_resolved && data->m_desync_side != 0 ) {
+		float desync_offset = 58.f * data->m_desync_side;
+
+		switch( data->m_stand_index2 % 4 ) {
+		case 0:
+			record->m_eye_angles.y = away + 180.f + desync_offset;
+			break;
+		case 1:
+			record->m_eye_angles.y = record->m_body + desync_offset;
+			break;
+		case 2:
+			record->m_eye_angles.y = away + 180.f - desync_offset;
+			break;
+		case 3:
+			record->m_eye_angles.y = record->m_body - desync_offset;
+			break;
+		}
+
+		return;
+	}
+
+	// fallback to original bruteforce when animation data is unavailable.
 	switch( data->m_stand_index2 % 6 ) {
 
 	case 0:
@@ -460,5 +587,12 @@ void Resolver::ResolvePoses( Player* player, LagRecord* record ) {
 
 		// body_yaw
 		player->m_flPoseParameter( )[ 11 ] = g_csgo.RandomInt( 1, 3 ) * 0.25f;
+	}
+
+	// for standing modes, use animation resolve data for body_yaw when available.
+	// body_yaw pose: 0.0 = full left, 0.5 = center, 1.0 = full right.
+	if( record->m_mode == Modes::RESOLVE_STAND1 || record->m_mode == Modes::RESOLVE_STAND2 ) {
+		if( data->m_anim_resolved && data->m_desync_side != 0 )
+			player->m_flPoseParameter( )[ 11 ] = ( data->m_desync_side > 0 ) ? 1.f : 0.f;
 	}
 }

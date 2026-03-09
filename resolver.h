@@ -28,6 +28,7 @@ public:
 	void SetMode( LagRecord* record );
 
 	void ResolveAngles( Player* player, LagRecord* record );
+	void ResolveAnimations( AimPlayer* data, LagRecord* record );
 	void ResolveWalk( AimPlayer* data, LagRecord* record );
 	void ResolveStand( AimPlayer* data, LagRecord* record );
 	void StandNS( AimPlayer* data, LagRecord* record );
