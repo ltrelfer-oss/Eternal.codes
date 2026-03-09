@@ -73,35 +73,35 @@ float Resolver::GetAwayAngle( LagRecord* record ) {
 
 	// we have no historical origins.
 	// no choice but to use the most recent one.
-	//if( g_cl.m_net_pos.empty( ) ) {
+	if( g_cl.m_net_pos.empty( ) ) {
 		math::VectorAngles( g_cl.m_local->m_vecOrigin( ) - record->m_pred_origin, away );
 		return away.y;
-	//}
+	}
 
 	// half of our rtt.
 	// also known as the one-way delay.
-	//float owd = ( g_cl.m_latency / 2.f );
+	float owd = ( g_cl.m_latency / 2.f );
 
 	// since our origins are computed here on the client
 	// we have to compensate for the delay between our client and the server
 	// therefore the OWD should be subtracted from the target time.
-	//float target = record->m_pred_time; //- owd;
+	float target = record->m_pred_time - owd;
 
 	// iterate all.
-	//for( const auto &net : g_cl.m_net_pos ) {
+	for( const auto &net : g_cl.m_net_pos ) {
 		// get the delta between this records time context
 		// and the target time.
-	//	float dt = std::abs( target - net.m_time );
+		float dt = std::abs( target - net.m_time );
 
 		// the best origin.
-	//	if( dt < delta ) {
-	//		delta = dt;
-	//		pos   = net.m_pos;
-	//	}
-	//}
+		if( dt < delta ) {
+			delta = dt;
+			pos   = net.m_pos;
+		}
+	}
 
-	//math::VectorAngles( pos - record->m_pred_origin, away );
-	//return away.y;
+	math::VectorAngles( pos - record->m_pred_origin, away );
+	return away.y;
 }
 
 void Resolver::MatchShot( AimPlayer* data, LagRecord* record ) {
@@ -364,26 +364,30 @@ void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 				return;
 			}
 
-			C_AnimationLayer* curr = &record->m_layers[ 3 ];
-			int act = data->m_player->GetSequenceActivity( curr->m_sequence );
-
-			// ok, no fucking update. apply big resolver.
-			record->m_eye_angles.y = move->m_body;
-
-			// every third shot do some fuckery.
-			if ( !( data->m_stand_index % 3 ) )
-				record->m_eye_angles.y += g_csgo.RandomFloat( -35.f, 35.f );
-
-			// jesus we can fucking stop missing can we?
-			if( data->m_stand_index > 6 && act != 980 ) {
-				// lets just hope they switched ang after move.
-				record->m_eye_angles.y = move->m_body + 180.f;
-			}
-
-			// we missed 4 shots.
-			else if( data->m_stand_index > 4 && act != 980 ) {
-				// try backwards.
+			// no animation data available, use deterministic brute-force
+			// cycle through known desync offsets instead of random jitter.
+			switch( data->m_stand_index % 7 ) {
+			case 0:
+				record->m_eye_angles.y = move->m_body;
+				break;
+			case 1:
+				record->m_eye_angles.y = move->m_body + 58.f;
+				break;
+			case 2:
+				record->m_eye_angles.y = move->m_body - 58.f;
+				break;
+			case 3:
 				record->m_eye_angles.y = away + 180.f;
+				break;
+			case 4:
+				record->m_eye_angles.y = move->m_body + 180.f;
+				break;
+			case 5:
+				record->m_eye_angles.y = move->m_body + 29.f;
+				break;
+			case 6:
+				record->m_eye_angles.y = move->m_body - 29.f;
+				break;
 			}
 
 			return;
@@ -518,7 +522,7 @@ void Resolver::ResolveAir( AimPlayer* data, LagRecord* record ) {
 	// this should be a rough estimation of where he is looking.
 	float velyaw = math::rad_to_deg( std::atan2( record->m_velocity.y, record->m_velocity.x ) );
 
-	switch( data->m_shots % 3 ) {
+	switch( data->m_shots % 7 ) {
 	case 0:
 		record->m_eye_angles.y = velyaw + 180.f;
 		break;
@@ -529,6 +533,22 @@ void Resolver::ResolveAir( AimPlayer* data, LagRecord* record ) {
 
 	case 2:
 		record->m_eye_angles.y = velyaw + 90.f;
+		break;
+
+	case 3:
+		record->m_eye_angles.y = velyaw + 135.f;
+		break;
+
+	case 4:
+		record->m_eye_angles.y = velyaw - 135.f;
+		break;
+
+	case 5:
+		record->m_eye_angles.y = velyaw + 45.f;
+		break;
+
+	case 6:
+		record->m_eye_angles.y = velyaw - 45.f;
 		break;
 	}
 }
@@ -580,13 +600,25 @@ void Resolver::ResolvePoses( Player* player, LagRecord* record ) {
 
 	// only do this bs when in air.
 	if( record->m_mode == Modes::RESOLVE_AIR ) {
-		// ang = pose min + pose val x ( pose range )
+		// compute pose parameters from the resolved eye angles
+		// instead of randomizing them, so the hitbox matrix
+		// matches the angle the resolver picked.
+		float eye_yaw   = record->m_eye_angles.y;
+		float body_yaw  = record->m_body;
 
-		// lean_yaw
-		player->m_flPoseParameter( )[ 2 ]  = g_csgo.RandomInt( 0, 4 ) * 0.25f;   
+		// body_yaw pose: normalize the delta between eye and body yaw
+		// into the 0-1 pose range. engine clamps desync to ~60 degrees,
+		// so map [-60, 60] -> [0, 1] with 0.5 as center (no desync).
+		float body_delta = math::NormalizedAngle( eye_yaw - body_yaw );
+		float body_pose  = ( body_delta + 60.f ) / 120.f;
+		math::clamp( body_pose, 0.f, 1.f );
+		player->m_flPoseParameter( )[ 11 ] = body_pose;
 
-		// body_yaw
-		player->m_flPoseParameter( )[ 11 ] = g_csgo.RandomInt( 1, 3 ) * 0.25f;
+		// lean_yaw pose: derive from pitch. map [-90, 90] -> [0, 1].
+		float pitch = record->m_eye_angles.x;
+		math::clamp( pitch, -90.f, 90.f );
+		float lean_pose = ( pitch + 90.f ) / 180.f;
+		player->m_flPoseParameter( )[ 2 ] = lean_pose;
 	}
 
 	// for standing modes, use animation resolve data for body_yaw when available.
