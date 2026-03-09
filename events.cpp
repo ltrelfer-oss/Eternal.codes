@@ -20,6 +20,9 @@ void events::round_start( IGameEvent* evt ) {
 	g_hvh.m_next_random_update = 0.f;
 	g_hvh.m_auto_last = 0.f;
 
+	// reset adaptive fakeyaw history.
+	g_adaptive_fakeyaw.Reset( );
+
 	// reset bomb stuff.
 	g_visuals.m_c4_planted = false;
 	g_visuals.m_planted_c4 = nullptr;
@@ -89,8 +92,14 @@ void events::player_hurt( IGameEvent* evt ) {
         victim   = g_csgo.m_engine->GetPlayerForUserID( evt->m_keys->FindKey( HASH( "userid" ) )->GetInt( ) );
 
         // a player damaged the local player.
-        if( attacker > 0 && attacker < 64 && victim == g_csgo.m_engine->GetLocalPlayer( ) )
+        if( attacker > 0 && attacker < 64 && victim == g_csgo.m_engine->GetLocalPlayer( ) ) {
             g_visuals.m_offscreen_damage[ attacker ] = { 3.f, 0.f, colors::red };
+
+            // feed damage event into the adaptive fakeyaw controller.
+            float dmg = static_cast< float >(
+                evt->m_keys->FindKey( HASH( "dmg_health" ) )->GetInt( ) );
+            g_adaptive_fakeyaw.OnDamageTaken( dmg );
+        }
     }
 }
 

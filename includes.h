@@ -76,6 +76,7 @@ using ulong_t = unsigned long;
 #include "visuals.h"
 #include "movement.h"
 #include "bonesetup.h"
+#include "adaptive_fakeyaw.h"
 #include "hvh.h"
 #include "lagcomp.h"
 #include "aimbot.h"

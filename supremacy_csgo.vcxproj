@@ -158,6 +158,7 @@
     <ClInclude Include="hooks.h" />
     <ClInclude Include="hud.h" />
     <ClInclude Include="hvh.h" />
+    <ClInclude Include="adaptive_fakeyaw.h" />
     <ClInclude Include="includes.h" />
     <ClInclude Include="input.h" />
     <ClInclude Include="interfaces.h" />
@@ -239,6 +240,7 @@
     <ClCompile Include="gui.cpp" />
     <ClCompile Include="hooks.cpp" />
     <ClCompile Include="hvh.cpp" />
+    <ClCompile Include="adaptive_fakeyaw.cpp" />
     <ClCompile Include="engine.cpp" />
     <ClCompile Include="knifebot.cpp" />
     <ClCompile Include="lagcomp.cpp" />
