@@ -184,6 +184,23 @@ public:
 	Slider	 fake_relative;
 	Slider	 fake_jitter_range;
 
+	// adaptive preset customization (col 2, visible when fake_yaw == default).
+	Dropdown adaptive_override;
+	Dropdown adaptive_preset_edit;
+
+	// per-preset sliders: [0]=stable, [1]=def_wide, [2]=def_tight,
+	//                     [3]=distorted, [4]=reactive, [5]=low_prof, [6]=high_press
+	Slider   adaptive_yaw_off[ 7 ];
+	Slider   adaptive_dist_amp[ 7 ];
+	Slider   adaptive_dist_freq[ 7 ];
+	Slider   adaptive_smooth[ 7 ];
+
+	// switch jitter per preset.
+	Checkbox adaptive_sw_jitter[ 7 ];
+	Slider   adaptive_sw_range[ 7 ];
+	Slider   adaptive_sw_speed[ 7 ];
+	Slider   adaptive_sw_offset[ 7 ];
+
 	Checkbox      lag_enable;
 	MultiDropdown lag_active;
 	Dropdown      lag_mode;
@@ -382,6 +399,104 @@ public:
 		fake_jitter_range.setup("", XOR("fake_jitter_range"), 1.f, 90.f, false, 0, 0.f, 5.f, XOR(L"�"));
 		fake_jitter_range.AddShowCallback(callbacks::IsFakeAntiAimJitter);
 		RegisterElement(&fake_jitter_range, 1);
+
+		// ---- adaptive preset customization ----
+		adaptive_override.setup(XOR("adaptive mode"), XOR("adaptive_override"),
+			{ XOR("auto"), XOR("stable"), XOR("def. wide"), XOR("def. tight"),
+			  XOR("distorted"), XOR("reactive"), XOR("low profile"), XOR("high pressure") });
+		adaptive_override.AddShowCallback(callbacks::IsFakeYawDefault);
+		RegisterElement(&adaptive_override, 1);
+
+		adaptive_preset_edit.setup(XOR("edit preset"), XOR("adaptive_preset_edit"),
+			{ XOR("stable"), XOR("def. wide"), XOR("def. tight"),
+			  XOR("distorted"), XOR("reactive"), XOR("low profile"), XOR("high pressure") });
+		adaptive_preset_edit.AddShowCallback(callbacks::IsFakeYawDefault);
+		RegisterElement(&adaptive_preset_edit, 1);
+
+		{
+			// Per-preset show callbacks (one per preset index).
+			bool(*presetCb[ 7 ])( ) = {
+				callbacks::IsAdaptivePresetStable,
+				callbacks::IsAdaptivePresetDefWide,
+				callbacks::IsAdaptivePresetDefTight,
+				callbacks::IsAdaptivePresetDistorted,
+				callbacks::IsAdaptivePresetReactive,
+				callbacks::IsAdaptivePresetLowProf,
+				callbacks::IsAdaptivePresetHighPress,
+			};
+
+			// File-id suffixes.
+			const char* suffix[ 7 ] = {
+				"_s", "_dw", "_dt", "_d", "_r", "_lp", "_hp"
+			};
+
+			// Default base yaw offsets from original presets.
+			float defYaw[ 7 ] = { 180.f, 180.f, 180.f, 180.f, 180.f, 180.f, 180.f };
+
+			// Default distortion amplitudes.
+			float defAmp[ 7 ] = { 5.f, 18.f, 8.f, 28.f, 22.f, 6.f, 38.f };
+
+			// Default distortion frequencies.
+			float defFreq[ 7 ] = { 0.5f, 1.0f, 0.8f, 1.6f, 2.1f, 0.4f, 2.6f };
+
+			// Default smoothing factors.
+			float defSmooth[ 7 ] = { 0.08f, 0.18f, 0.14f, 0.22f, 0.30f, 0.09f, 0.36f };
+
+			for( int i = 0; i < 7; ++i ) {
+				std::string s = suffix[ i ];
+
+				adaptive_yaw_off[ i ].setup(XOR("base yaw offset"), std::string("afky_yaw") + s,
+					-180.f, 180.f, true, 0, defYaw[ i ], 5.f, XOR(L"\u00B0"));
+				adaptive_yaw_off[ i ].AddShowCallback(callbacks::IsFakeYawDefault);
+				adaptive_yaw_off[ i ].AddShowCallback(presetCb[ i ]);
+				RegisterElement(&adaptive_yaw_off[ i ], 1);
+
+				adaptive_dist_amp[ i ].setup(XOR("distortion amp"), std::string("afky_amp") + s,
+					0.f, 60.f, true, 1, defAmp[ i ], 1.f, XOR(L"\u00B0"));
+				adaptive_dist_amp[ i ].AddShowCallback(callbacks::IsFakeYawDefault);
+				adaptive_dist_amp[ i ].AddShowCallback(presetCb[ i ]);
+				RegisterElement(&adaptive_dist_amp[ i ], 1);
+
+				adaptive_dist_freq[ i ].setup(XOR("distortion freq"), std::string("afky_freq") + s,
+					0.1f, 5.0f, true, 2, defFreq[ i ], 0.1f, XOR(L" Hz"));
+				adaptive_dist_freq[ i ].AddShowCallback(callbacks::IsFakeYawDefault);
+				adaptive_dist_freq[ i ].AddShowCallback(presetCb[ i ]);
+				RegisterElement(&adaptive_dist_freq[ i ], 1);
+
+				adaptive_smooth[ i ].setup(XOR("smoothing"), std::string("afky_sm") + s,
+					0.01f, 1.0f, true, 2, defSmooth[ i ], 0.01f);
+				adaptive_smooth[ i ].AddShowCallback(callbacks::IsFakeYawDefault);
+				adaptive_smooth[ i ].AddShowCallback(presetCb[ i ]);
+				RegisterElement(&adaptive_smooth[ i ], 1);
+
+				// ---- switch jitter per preset ----
+				adaptive_sw_jitter[ i ].setup(XOR("switch jitter"), std::string("afky_swj") + s);
+				adaptive_sw_jitter[ i ].AddShowCallback(callbacks::IsFakeYawDefault);
+				adaptive_sw_jitter[ i ].AddShowCallback(presetCb[ i ]);
+				RegisterElement(&adaptive_sw_jitter[ i ], 1);
+
+				adaptive_sw_range[ i ].setup(XOR("jitter range"), std::string("afky_swr") + s,
+					1.f, 180.f, true, 0, 45.f, 5.f, XOR(L"\u00B0"));
+				adaptive_sw_range[ i ].AddShowCallback(callbacks::IsFakeYawDefault);
+				adaptive_sw_range[ i ].AddShowCallback(presetCb[ i ]);
+				adaptive_sw_range[ i ].AddShowCallback(callbacks::IsAdaptiveSwitchJitter);
+				RegisterElement(&adaptive_sw_range[ i ], 1);
+
+				adaptive_sw_speed[ i ].setup(XOR("jitter speed"), std::string("afky_sws") + s,
+					0.1f, 10.0f, true, 1, 2.0f, 0.1f, XOR(L" Hz"));
+				adaptive_sw_speed[ i ].AddShowCallback(callbacks::IsFakeYawDefault);
+				adaptive_sw_speed[ i ].AddShowCallback(presetCb[ i ]);
+				adaptive_sw_speed[ i ].AddShowCallback(callbacks::IsAdaptiveSwitchJitter);
+				RegisterElement(&adaptive_sw_speed[ i ], 1);
+
+				adaptive_sw_offset[ i ].setup(XOR("jitter offset"), std::string("afky_swo") + s,
+					-180.f, 180.f, true, 0, 0.f, 5.f, XOR(L"\u00B0"));
+				adaptive_sw_offset[ i ].AddShowCallback(callbacks::IsFakeYawDefault);
+				adaptive_sw_offset[ i ].AddShowCallback(presetCb[ i ]);
+				adaptive_sw_offset[ i ].AddShowCallback(callbacks::IsAdaptiveSwitchJitter);
+				RegisterElement(&adaptive_sw_offset[ i ], 1);
+			}
+		}
 
 		// col 2.
 		lag_enable.setup(XOR("fake-lag"), XOR("lag_enable"));

@@ -48,6 +48,12 @@ struct MovementPresetConfig {
 
     // Amplitude scalar applied based on current threat level.
     float threatMultiplier;
+
+    // ---- Switch-jitter layer (applied on top of distortion) ----
+    bool  switchJitterEnabled;   // if true, alternating offset is added
+    float switchJitterRange;     // max swing in degrees
+    float switchJitterSpeed;     // alternation frequency (Hz)
+    float switchJitterOffset;    // static bias added to the jitter
 };
 
 // ----------------------------------------------------------------------------
@@ -173,6 +179,7 @@ public:
     float targetMovementOffset;  // ideal yaw = direction + this
     float blendedMovementOffset; // smoothed output (apply to view angle)
     float distortionOffset;      // pure distortion contribution (degrees)
+    float switchJitterOut;       // switch-jitter contribution (degrees)
     float confidenceScore;       // 0..1 – confidence in current preset
 
     // ---- Debug info ----------------------------------------------------
@@ -195,7 +202,10 @@ public:
 
 private:
     // ---- Preset table (defined in .cpp) --------------------------------
-    static const MovementPresetConfig s_presets[ ADAPTIVE_PRESET_COUNT ];
+    static MovementPresetConfig s_presets[ ADAPTIVE_PRESET_COUNT ];
+
+    // Read menu slider overrides and apply to s_presets.
+    void SyncFromMenu( );
 
     // ---- Helper: derive HeightState from game flags --------------------
     HeightState DeriveHeightState( ) const;
