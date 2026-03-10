@@ -632,11 +632,11 @@ void AdaptiveMovementController::Update( float direction ) {
         // Alternating sign at switchJitterSpeed Hz, with range and offset.
         float halfRange = active.switchJitterRange / 2.f;
         float phase     = std::sin( now * active.switchJitterSpeed
-                                    * 6.2831853f ); // 2*pi
-        // Quantise to hard left/right switch with smooth micro-noise.
+                                    * math::pi_2 );
+        // Hard left/right switch modulated by sine amplitude (0..1).
         float sign = ( phase >= 0.f ) ? 1.f : -1.f;
-        float noise = std::abs( phase ); // 0..1 modulation within the half
-        switchJitterOut = sign * halfRange * noise + active.switchJitterOffset;
+        float magnitude = std::abs( phase );
+        switchJitterOut = sign * halfRange * magnitude + active.switchJitterOffset;
 
         // Cap to ±180.
         switchJitterOut = std::clamp( switchJitterOut, -180.f, 180.f );
