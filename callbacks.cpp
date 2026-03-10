@@ -203,6 +203,50 @@ bool callbacks::IsFakeAntiAimJitter( ) {
 	return g_menu.main.antiaim.fake_yaw.get( ) == 3;
 }
 
+bool callbacks::IsFakeYawDefault( ) {
+	return g_menu.main.antiaim.fake_yaw.get( ) == 1;
+}
+
+bool callbacks::IsAdaptiveOverrideForced( ) {
+	return g_menu.main.antiaim.adaptive_override.get( ) > 0;
+}
+
+bool callbacks::IsAdaptivePresetStable( ) {
+	return g_menu.main.antiaim.adaptive_preset_edit.get( ) == 0;
+}
+
+bool callbacks::IsAdaptivePresetDefWide( ) {
+	return g_menu.main.antiaim.adaptive_preset_edit.get( ) == 1;
+}
+
+bool callbacks::IsAdaptivePresetDefTight( ) {
+	return g_menu.main.antiaim.adaptive_preset_edit.get( ) == 2;
+}
+
+bool callbacks::IsAdaptivePresetDistorted( ) {
+	return g_menu.main.antiaim.adaptive_preset_edit.get( ) == 3;
+}
+
+bool callbacks::IsAdaptivePresetReactive( ) {
+	return g_menu.main.antiaim.adaptive_preset_edit.get( ) == 4;
+}
+
+bool callbacks::IsAdaptivePresetLowProf( ) {
+	return g_menu.main.antiaim.adaptive_preset_edit.get( ) == 5;
+}
+
+bool callbacks::IsAdaptivePresetHighPress( ) {
+	return g_menu.main.antiaim.adaptive_preset_edit.get( ) == 6;
+}
+
+bool callbacks::IsAdaptiveSwitchJitter( ) {
+	// Switch jitter is per-preset; check the currently edited preset's toggle.
+	size_t idx = g_menu.main.antiaim.adaptive_preset_edit.get( );
+	if( idx < 7 )
+		return g_menu.main.antiaim.adaptive_sw_jitter[ idx ].get( );
+	return false;
+}
+
 bool callbacks::IsConfigMM( ) {
 	return g_menu.main.config.mode.get( ) == 0;
 }

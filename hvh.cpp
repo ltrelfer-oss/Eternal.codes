@@ -555,10 +555,11 @@ void HVH::DoFakeAntiAim( ) {
 		// Run the adaptive controller for this tick.
 		g_adaptive_fakeyaw.Update( m_direction );
 
-		// Apply: direction + blended preset offset + distortion layer.
+		// Apply: direction + blended preset offset + distortion + switch jitter.
 		g_cl.m_cmd->m_view_angles.y = m_direction
 		    + g_adaptive_fakeyaw.blendedMovementOffset
-		    + g_adaptive_fakeyaw.distortionOffset;
+		    + g_adaptive_fakeyaw.distortionOffset
+		    + g_adaptive_fakeyaw.switchJitterOut;
 		break;
 	}
 

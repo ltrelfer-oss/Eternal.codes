@@ -7,7 +7,7 @@ AdaptiveMovementController g_adaptive_fakeyaw{ };
 // Preset definitions
 // Tune these values to change each preset's behaviour.
 // ============================================================================
-const MovementPresetConfig
+MovementPresetConfig
 AdaptiveMovementController::s_presets[ ADAPTIVE_PRESET_COUNT ] = {
     // --- Stable -----------------------------------------------------------
     // Calm, low-noise movement. Preferred at low threat with no recent hits.
@@ -20,6 +20,10 @@ AdaptiveMovementController::s_presets[ ADAPTIVE_PRESET_COUNT ] = {
         /* smoothingFactor     */ 0.08f,
         /* stanceMultiplier    */ 1.0f,
         /* threatMultiplier    */ 0.5f,
+        /* switchJitterEnabled */ false,
+        /* switchJitterRange   */ 45.f,
+        /* switchJitterSpeed   */ 2.0f,
+        /* switchJitterOffset  */ 0.f,
     },
 
     // --- DefensiveWide ---------------------------------------------------
@@ -33,6 +37,10 @@ AdaptiveMovementController::s_presets[ ADAPTIVE_PRESET_COUNT ] = {
         /* smoothingFactor     */ 0.18f,
         /* stanceMultiplier    */ 1.2f,
         /* threatMultiplier    */ 0.8f,
+        /* switchJitterEnabled */ false,
+        /* switchJitterRange   */ 45.f,
+        /* switchJitterSpeed   */ 2.0f,
+        /* switchJitterOffset  */ 0.f,
     },
 
     // --- DefensiveTight --------------------------------------------------
@@ -46,6 +54,10 @@ AdaptiveMovementController::s_presets[ ADAPTIVE_PRESET_COUNT ] = {
         /* smoothingFactor     */ 0.14f,
         /* stanceMultiplier    */ 0.8f,
         /* threatMultiplier    */ 1.2f,
+        /* switchJitterEnabled */ false,
+        /* switchJitterRange   */ 45.f,
+        /* switchJitterSpeed   */ 2.0f,
+        /* switchJitterOffset  */ 0.f,
     },
 
     // --- Distorted -------------------------------------------------------
@@ -60,6 +72,10 @@ AdaptiveMovementController::s_presets[ ADAPTIVE_PRESET_COUNT ] = {
         /* smoothingFactor     */ 0.22f,
         /* stanceMultiplier    */ 1.0f,
         /* threatMultiplier    */ 0.7f,
+        /* switchJitterEnabled */ false,
+        /* switchJitterRange   */ 45.f,
+        /* switchJitterSpeed   */ 2.0f,
+        /* switchJitterOffset  */ 0.f,
     },
 
     // --- Reactive --------------------------------------------------------
@@ -74,6 +90,10 @@ AdaptiveMovementController::s_presets[ ADAPTIVE_PRESET_COUNT ] = {
         /* smoothingFactor     */ 0.30f,
         /* stanceMultiplier    */ 1.0f,
         /* threatMultiplier    */ 0.9f,
+        /* switchJitterEnabled */ false,
+        /* switchJitterRange   */ 45.f,
+        /* switchJitterSpeed   */ 2.0f,
+        /* switchJitterOffset  */ 0.f,
     },
 
     // --- LowProfile ------------------------------------------------------
@@ -87,6 +107,10 @@ AdaptiveMovementController::s_presets[ ADAPTIVE_PRESET_COUNT ] = {
         /* smoothingFactor     */ 0.09f,
         /* stanceMultiplier    */ 0.55f,
         /* threatMultiplier    */ 0.6f,
+        /* switchJitterEnabled */ false,
+        /* switchJitterRange   */ 45.f,
+        /* switchJitterSpeed   */ 2.0f,
+        /* switchJitterOffset  */ 0.f,
     },
 
     // --- HighPressure ----------------------------------------------------
@@ -101,6 +125,10 @@ AdaptiveMovementController::s_presets[ ADAPTIVE_PRESET_COUNT ] = {
         /* smoothingFactor     */ 0.36f,
         /* stanceMultiplier    */ 1.3f,
         /* threatMultiplier    */ 1.5f,
+        /* switchJitterEnabled */ false,
+        /* switchJitterRange   */ 45.f,
+        /* switchJitterSpeed   */ 2.0f,
+        /* switchJitterOffset  */ 0.f,
     },
 };
 
@@ -299,6 +327,7 @@ AdaptiveMovementController::AdaptiveMovementController( )
       targetMovementOffset{ 180.f },
       blendedMovementOffset{ 180.f },
       distortionOffset{ 0.f },
+      switchJitterOut{ 0.f },
       confidenceScore{ 0.f },
       lastSwitchReason{ "init" },
       currentHeightState{ HeightState::Standing },
@@ -355,6 +384,21 @@ void AdaptiveMovementController::Reset( ) {
     m_targetPreset    = static_cast< int >( PresetIndex::Stable );
     m_smoothedOffset  = 180.f;
     lastSwitchReason  = XOR( "round start" );
+}
+
+void AdaptiveMovementController::SyncFromMenu( ) {
+    for( int i = 0; i < ADAPTIVE_PRESET_COUNT; ++i ) {
+        MovementPresetConfig& p = s_presets[ i ];
+        p.baseYawOffset       = g_menu.main.antiaim.adaptive_yaw_off[ i ].get( );
+        p.distortionAmplitude = g_menu.main.antiaim.adaptive_dist_amp[ i ].get( );
+        p.distortionFrequency = g_menu.main.antiaim.adaptive_dist_freq[ i ].get( );
+        p.smoothingFactor     = g_menu.main.antiaim.adaptive_smooth[ i ].get( );
+
+        p.switchJitterEnabled = g_menu.main.antiaim.adaptive_sw_jitter[ i ].get( );
+        p.switchJitterRange   = g_menu.main.antiaim.adaptive_sw_range[ i ].get( );
+        p.switchJitterSpeed   = g_menu.main.antiaim.adaptive_sw_speed[ i ].get( );
+        p.switchJitterOffset  = g_menu.main.antiaim.adaptive_sw_offset[ i ].get( );
+    }
 }
 
 HeightState AdaptiveMovementController::DeriveHeightState( ) const {
@@ -462,6 +506,9 @@ void AdaptiveMovementController::Update( float direction ) {
     if( !g_cl.m_local || !g_cl.m_local->alive( ) )
         return;
 
+    // ---- Sync preset parameters from menu sliders ----------------------
+    SyncFromMenu( );
+
     float now = g_csgo.m_globals->m_curtime;
     float dt  = now - m_prevTime;
     m_prevTime = now;
@@ -469,6 +516,10 @@ void AdaptiveMovementController::Update( float direction ) {
     // Clamp dt to avoid huge jumps after first call or pauses.
     if( dt <= 0.f || dt > 0.5f )
         dt = g_csgo.m_globals->m_interval;
+
+    // ---- Check for forced preset override from menu --------------------
+    int overrideIdx = static_cast< int >(
+        g_menu.main.antiaim.adaptive_override.get( ) ) - 1; // 0 = auto
 
     // ---- Update subsystems ---------------------------------------------
     HeightState hs = DeriveHeightState( );
@@ -482,58 +533,71 @@ void AdaptiveMovementController::Update( float direction ) {
     // Push a neutral frame (damage/evasion events push their own entries).
     m_history.Push( now, 0.f, 0, hs, m_activePreset );
 
-    // ---- Score presets -------------------------------------------------
-    auto scores = ScorePresets( m_threat, hs, rDmg, rEvas );
-
-    // Find the highest-scoring candidate.
-    int   bestIdx   = 0;
-    float bestScore = scores[ 0 ];
-    for( int i = 1; i < ADAPTIVE_PRESET_COUNT; ++i ) {
-        if( scores[ i ] > bestScore ) {
-            bestScore = scores[ i ];
-            bestIdx   = i;
-        }
-    }
-
-    float activeScore = scores[ m_activePreset ];
-
-    // ---- Hysteresis-gated switching ------------------------------------
-    m_holdTimer += dt;
-
-    bool canSwitch =
-        m_holdTimer  >= MIN_HOLD_TIME &&
-        ( now - m_lastSwitchTime ) >= POST_SWITCH_COOLDOWN;
-
-    bool shouldSwitch =
-        canSwitch &&
-        bestIdx != m_activePreset &&
-        ( bestScore - activeScore ) >= SWITCH_THRESHOLD;
-
-    // Two-tick confirmation gate: a candidate preset must score above the
-    // active one for two *consecutive* ticks before we commit to the switch.
-    // This prevents rapid preset flipping when scores are oscillating around
-    // the SWITCH_THRESHOLD boundary (e.g. mid-fight with alternating hits).
-    if( shouldSwitch ) {
-        if( m_targetPreset == bestIdx ) {
-            // Confirmed for a second tick – execute the switch.
-            m_activePreset   = bestIdx;
-            m_targetPreset   = bestIdx;
+    if( overrideIdx >= 0 && overrideIdx < ADAPTIVE_PRESET_COUNT ) {
+        // ---- Forced preset mode ----------------------------------------
+        if( m_activePreset != overrideIdx ) {
+            m_activePreset   = overrideIdx;
+            m_targetPreset   = overrideIdx;
+            m_blendAlpha     = 0.f;
             m_holdTimer      = 0.f;
             m_lastSwitchTime = now;
-            m_blendAlpha     = 0.f; // start blending to new preset
-
-            const MovementPresetConfig& pc = s_presets[ bestIdx ];
             lastSwitchReason = tfm::format(
-                XOR( "->%s (score %.2f thr %.2f dmg %.0f)" ),
-                pc.name, bestScore, m_threat.threatLevel, rDmg );
-
-        } else {
-            // First tick seeing this candidate – prime for next tick.
-            m_targetPreset = bestIdx;
+                XOR( "forced->%s" ), s_presets[ overrideIdx ].name );
         }
-    } else if( !canSwitch ) {
-        // Keep target aligned while in cooldown / hold period.
-        m_targetPreset = m_activePreset;
+    } else {
+        // ---- Auto mode: score presets ----------------------------------
+        auto scores = ScorePresets( m_threat, hs, rDmg, rEvas );
+
+        // Find the highest-scoring candidate.
+        int   bestIdx   = 0;
+        float bestScore = scores[ 0 ];
+        for( int i = 1; i < ADAPTIVE_PRESET_COUNT; ++i ) {
+            if( scores[ i ] > bestScore ) {
+                bestScore = scores[ i ];
+                bestIdx   = i;
+            }
+        }
+
+        float activeScore = scores[ m_activePreset ];
+
+        // ---- Hysteresis-gated switching --------------------------------
+        m_holdTimer += dt;
+
+        bool canSwitch =
+            m_holdTimer  >= MIN_HOLD_TIME &&
+            ( now - m_lastSwitchTime ) >= POST_SWITCH_COOLDOWN;
+
+        bool shouldSwitch =
+            canSwitch &&
+            bestIdx != m_activePreset &&
+            ( bestScore - activeScore ) >= SWITCH_THRESHOLD;
+
+        if( shouldSwitch ) {
+            if( m_targetPreset == bestIdx ) {
+                m_activePreset   = bestIdx;
+                m_targetPreset   = bestIdx;
+                m_holdTimer      = 0.f;
+                m_lastSwitchTime = now;
+                m_blendAlpha     = 0.f;
+
+                const MovementPresetConfig& pc = s_presets[ bestIdx ];
+                lastSwitchReason = tfm::format(
+                    XOR( "->%s (score %.2f thr %.2f dmg %.0f)" ),
+                    pc.name, bestScore, m_threat.threatLevel, rDmg );
+            } else {
+                m_targetPreset = bestIdx;
+            }
+        } else if( !canSwitch ) {
+            m_targetPreset = m_activePreset;
+        }
+
+        // Confidence score uses auto-mode scoring.
+        float secondBest = 0.f;
+        for( int i = 0; i < ADAPTIVE_PRESET_COUNT; ++i ) {
+            if( i == bestIdx ) continue;
+            if( scores[ i ] > secondBest ) secondBest = scores[ i ];
+        }
+        confidenceScore = std::clamp( ( bestScore - secondBest ) / 0.5f, 0.f, 1.f );
     }
 
     // ---- Compute effective amplitude -----------------------------------
@@ -562,6 +626,22 @@ void AdaptiveMovementController::Update( float direction ) {
         hs,
         m_threat.threatLevel );
 
+    // ---- Switch-jitter layer -------------------------------------------
+    switchJitterOut = 0.f;
+    if( active.switchJitterEnabled ) {
+        // Alternating sign at switchJitterSpeed Hz, with range and offset.
+        float halfRange = active.switchJitterRange / 2.f;
+        float phase     = std::sin( now * active.switchJitterSpeed
+                                    * math::pi_2 );
+        // Hard left/right switch modulated by sine amplitude (0..1).
+        float sign = ( phase >= 0.f ) ? 1.f : -1.f;
+        float magnitude = std::abs( phase );
+        switchJitterOut = sign * halfRange * magnitude + active.switchJitterOffset;
+
+        // Cap to ±180.
+        switchJitterOut = std::clamp( switchJitterOut, -180.f, 180.f );
+    }
+
     // ---- Target and blended offset -------------------------------------
     targetMovementOffset = active.baseYawOffset;
 
@@ -582,15 +662,6 @@ void AdaptiveMovementController::Update( float direction ) {
 
     blendedMovementOffset = m_smoothedOffset;
 
-    // ---- Confidence score (0..1) ----------------------------------------
-    // Use margin between best and second-best score.
-    float secondBest = 0.f;
-    for( int i = 0; i < ADAPTIVE_PRESET_COUNT; ++i ) {
-        if( i == bestIdx ) continue;
-        if( scores[ i ] > secondBest ) secondBest = scores[ i ];
-    }
-    confidenceScore = std::clamp( ( bestScore - secondBest ) / 0.5f, 0.f, 1.f );
-
     // ---- Expose public debug fields ------------------------------------
     currentPreset      = m_activePreset;
     currentHeightState = hs;
@@ -606,13 +677,14 @@ void AdaptiveMovementController::Update( float direction ) {
 
         std::string dbg = tfm::format(
             XOR( "[afky] preset=%s thr=%.2f hs=%d hits=%d evas=%d "
-                 "dist=%.1f conf=%.2f %s\n" ),
+                 "dist=%.1f swj=%.1f conf=%.2f %s\n" ),
             s_presets[ m_activePreset ].name,
             m_threat.threatLevel,
             static_cast< int >( hs ),
             rHits,
             static_cast< int >( rEvas ),
             distortionOffset,
+            switchJitterOut,
             confidenceScore,
             lastSwitchReason );
 

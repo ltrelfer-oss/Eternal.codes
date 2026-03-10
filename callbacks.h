@@ -46,6 +46,16 @@ namespace callbacks {
 	bool IsAirDirCustom( );
 	bool IsFakeAntiAimRelative( );
 	bool IsFakeAntiAimJitter( );
+	bool IsFakeYawDefault( );
+	bool IsAdaptiveOverrideForced( );
+	bool IsAdaptivePresetStable( );
+	bool IsAdaptivePresetDefWide( );
+	bool IsAdaptivePresetDefTight( );
+	bool IsAdaptivePresetDistorted( );
+	bool IsAdaptivePresetReactive( );
+	bool IsAdaptivePresetLowProf( );
+	bool IsAdaptivePresetHighPress( );
+	bool IsAdaptiveSwitchJitter( );
 	
 	bool IsConfigMM( );
 	bool IsConfigNS( );
