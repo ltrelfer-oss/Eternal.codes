@@ -247,6 +247,158 @@ bool callbacks::IsAdaptiveSwitchJitter( ) {
 	return false;
 }
 
+// --- orientation ---
+bool callbacks::IsOrientModeRandom( ) {
+	return g_menu.main.antiaim.orient_mode.get( ) == 3;
+}
+
+bool callbacks::IsOrientModeScripted( ) {
+	return g_menu.main.antiaim.orient_mode.get( ) == 4;
+}
+
+bool callbacks::HasOrientOffset( ) {
+	return g_menu.main.antiaim.orient_mode.get( ) > 0;
+}
+
+bool callbacks::IsOrientDynamic( ) {
+	return g_menu.main.antiaim.orient_dynamic.get( );
+}
+
+// --- horizontal control ---
+bool callbacks::HasHorizControl( ) {
+	return g_menu.main.antiaim.horiz_enable.get( );
+}
+
+bool callbacks::IsSnapToAngle( ) {
+	return g_menu.main.antiaim.horiz_snap_steps.get( ) > 0.f;
+}
+
+// --- vertical control ---
+bool callbacks::HasVertControl( ) {
+	return g_menu.main.antiaim.vert_enable.get( );
+}
+
+// --- state profiles ---
+bool callbacks::IsProfileStand( ) {
+	return g_menu.main.antiaim.profile_select.get( ) == 0;
+}
+
+bool callbacks::IsProfileWalk( ) {
+	return g_menu.main.antiaim.profile_select.get( ) == 1;
+}
+
+bool callbacks::IsProfileRun( ) {
+	return g_menu.main.antiaim.profile_select.get( ) == 2;
+}
+
+bool callbacks::IsProfileCrouch( ) {
+	return g_menu.main.antiaim.profile_select.get( ) == 3;
+}
+
+bool callbacks::IsProfileAir( ) {
+	return g_menu.main.antiaim.profile_select.get( ) == 4;
+}
+
+bool callbacks::IsProfileLand( ) {
+	return g_menu.main.antiaim.profile_select.get( ) == 5;
+}
+
+bool callbacks::IsProfileCustomA( ) {
+	return g_menu.main.antiaim.profile_select.get( ) == 6;
+}
+
+bool callbacks::IsProfileCustomB( ) {
+	return g_menu.main.antiaim.profile_select.get( ) == 7;
+}
+
+bool callbacks::IsProfileCustomC( ) {
+	return g_menu.main.antiaim.profile_select.get( ) == 8;
+}
+
+// --- randomization ---
+bool callbacks::IsRandomEnabled( ) {
+	return g_menu.main.antiaim.rand_enable.get( );
+}
+
+bool callbacks::IsRandModeDrift( ) {
+	return g_menu.main.antiaim.rand_mode.get( ) == 0;
+}
+
+bool callbacks::IsRandModePivot( ) {
+	return g_menu.main.antiaim.rand_mode.get( ) == 1;
+}
+
+bool callbacks::IsRandModeBurst( ) {
+	return g_menu.main.antiaim.rand_mode.get( ) == 2;
+}
+
+// --- timeline ---
+bool callbacks::IsTimelineEnabled( ) {
+	return g_menu.main.antiaim.tl_enable.get( );
+}
+
+// --- input reaction ---
+bool callbacks::IsInputReactionOn( ) {
+	return g_menu.main.antiaim.input_react_enable.get( );
+}
+
+// --- limits & safety ---
+bool callbacks::IsLimitsEnabled( ) {
+	return g_menu.main.antiaim.limits_enable.get( );
+}
+
+bool callbacks::IsAutoResetOn( ) {
+	return g_menu.main.antiaim.auto_reset.get( );
+}
+
+// --- visualization ---
+bool callbacks::IsAAIndicatorOn( ) {
+	return g_menu.main.antiaim.vis_indicator.get( );
+}
+
+bool callbacks::IsIndicatorArrow( ) {
+	return g_menu.main.antiaim.vis_style.get( ) == 0;
+}
+
+bool callbacks::IsIndicatorCompass( ) {
+	return g_menu.main.antiaim.vis_style.get( ) == 1;
+}
+
+bool callbacks::IsIndicatorMinimal( ) {
+	return g_menu.main.antiaim.vis_style.get( ) == 2;
+}
+
+bool callbacks::IsDebugLinesOn( ) {
+	return g_menu.main.antiaim.vis_debug_lines.get( );
+}
+
+// --- debug ---
+bool callbacks::IsAADebugEnabled( ) {
+	return g_menu.main.antiaim.dbg_enable.get( );
+}
+
+// --- preset management action callbacks ---
+void callbacks::AAPresetSave( ) {
+	g_notify.add( XOR( "aa preset saved\n" ) );
+}
+
+void callbacks::AAPresetLoad( ) {
+	g_notify.add( XOR( "aa preset loaded\n" ) );
+}
+
+void callbacks::AAPresetReset( ) {
+	// reset all orientation / horizontal / vertical defaults
+	g_menu.main.antiaim.orient_mode.set( 0 );
+	g_menu.main.antiaim.orient_offset.set( 0.f );
+	g_menu.main.antiaim.horiz_enable.set( false );
+	g_menu.main.antiaim.vert_enable.set( false );
+	g_menu.main.antiaim.rand_enable.set( false );
+	g_menu.main.antiaim.tl_enable.set( false );
+	g_menu.main.antiaim.input_react_enable.set( false );
+	g_menu.main.antiaim.limits_enable.set( false );
+	g_notify.add( XOR( "aa preset reset to default\n" ) );
+}
+
 bool callbacks::IsConfigMM( ) {
 	return g_menu.main.config.mode.get( ) == 0;
 }

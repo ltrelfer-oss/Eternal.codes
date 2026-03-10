@@ -207,6 +207,98 @@ public:
 	Slider        lag_limit;
 	Checkbox      lag_land;
 
+	// ======================================================================
+	// Extended anti-aim customisation
+	// ======================================================================
+
+	// --- Orientation mode & layers ---
+	Dropdown orient_mode;       // neutral / defensive / aggressive / random / scripted
+	Slider   orient_offset;     // static offset angle (degrees)
+	Checkbox orient_dynamic;    // enable dynamic offset curve
+	Slider   orient_dyn_speed;  // timeline curve speed
+	Dropdown orient_context;    // standing / moving / jumping / falling presets
+
+	// --- Horizontal control ---
+	Checkbox horiz_enable;
+	Slider   horiz_max_turn;    // max turn speed deg/s
+	Slider   horiz_accel;       // turn acceleration
+	Slider   horiz_snap_steps;  // snap-to-angle step size (0 = off)
+	Slider   horiz_smooth;      // turn smoothing 0-100%
+	Checkbox horiz_invert;      // invert horizontal
+
+	// --- Vertical control ---
+	Checkbox vert_enable;
+	Slider   vert_pitch_up;     // pitch range limit up
+	Slider   vert_pitch_down;   // pitch range limit down
+	Dropdown vert_bias;         // prefer up / prefer down / neutral
+	Slider   vert_smooth;       // pitch smoothing 0-100%
+	Slider   vert_react_speed;  // pitch reaction speed
+
+	// --- State-based profiles ---
+	Dropdown profile_select;    // stand / walk / run / crouch / air / land / customA/B/C
+	Slider   profile_yaw_off[ 9 ];   // yaw offset per profile
+	Slider   profile_pitch_off[ 9 ]; // pitch offset per profile
+	Keybind  profile_hotkey_a;
+	Keybind  profile_hotkey_b;
+	Keybind  profile_hotkey_c;
+
+	// --- Randomization (training/sandbox) ---
+	Checkbox rand_enable;
+	Slider   rand_offset_min;   // random offset range min
+	Slider   rand_offset_max;   // random offset range max
+	Slider   rand_interval_min; // random interval min (ms)
+	Slider   rand_interval_max; // random interval max (ms)
+	Slider   rand_seed;         // random seed
+	Dropdown rand_mode;         // continuous drift / sudden pivot / burst pattern
+
+	// --- Timeline editor ---
+	Checkbox tl_enable;
+	Slider   tl_kf_count;       // number of keyframes
+	Slider   tl_kf_time[ 4 ];   // time for each keyframe
+	Slider   tl_kf_angle[ 4 ];  // target angle per keyframe
+	Dropdown tl_kf_interp[ 4 ]; // interpolation type per keyframe
+	Dropdown tl_loop;           // no loop / loop forward / ping-pong
+	Slider   tl_speed;          // global playback speed
+
+	// --- Input reaction ---
+	Checkbox input_react_enable;
+	Slider   input_react_move;    // reaction to movement keys 0-100%
+	Slider   input_react_mouse;   // reaction to mouse movement 0-100%
+	Slider   input_react_delay;   // delay before reacting (ms)
+	Slider   input_react_fwd;     // forward/backward scale
+	Slider   input_react_side;    // left/right scale
+	Slider   input_react_jump;    // jump/crouch scale
+
+	// --- Limits & safety ---
+	Checkbox limits_enable;
+	Slider   limits_clamp_min;    // clamp angle range min
+	Slider   limits_clamp_max;    // clamp angle range max
+	Slider   limits_max_rate;     // max rate-of-change deg/s
+	Keybind  limits_reset_key;    // hard reset angle keybind
+	Checkbox auto_reset;          // auto-reset master toggle
+	MultiDropdown auto_reset_on;  // round start / teleport / respawn / config load
+
+	// --- Visualization ---
+	Checkbox  vis_indicator;      // show orientation indicator in HUD
+	Dropdown  vis_style;          // arrow / compass ring / minimal marker
+	Slider    vis_size;           // indicator size
+	Slider    vis_opacity;        // indicator opacity
+	Colorpicker vis_color;        // color preset
+	Checkbox  vis_debug_lines;    // 3D debug lines in world
+
+	// --- Preset management ---
+	Dropdown  preset_slot;        // slot selector
+	Button    preset_save;        // save current as preset
+	Button    preset_load;        // load preset
+	Button    preset_reset;       // reset to default
+
+	// --- Debug & logging ---
+	Checkbox  dbg_enable;         // enable debug overlay
+	Checkbox  dbg_show_angle;     // show current angle (numeric)
+	Checkbox  dbg_show_target;    // show target angle (numeric)
+	Checkbox  dbg_show_mode;      // show current mode/profile
+	Checkbox  dbg_log;            // log changes to console/file
+
 public:
 	void init() {
 		SetTitle(XOR("anti-aim"));
@@ -497,6 +589,312 @@ public:
 				RegisterElement(&adaptive_sw_offset[ i ], 1);
 			}
 		}
+
+		// ==================================================================
+		// Extended anti-aim customisation – col 1 (bottom section)
+		// ==================================================================
+
+		// --- Orientation mode & layers ---
+		orient_mode.setup(XOR("orientation mode"), XOR("orient_mode"),
+			{ XOR("neutral"), XOR("defensive"), XOR("aggressive"), XOR("random"), XOR("scripted") });
+		RegisterElement(&orient_mode);
+
+		orient_offset.setup(XOR("offset angle"), XOR("orient_offset"), -180.f, 180.f, true, 0, 0.f, 5.f, XOR(L"\u00B0"));
+		orient_offset.AddShowCallback(callbacks::HasOrientOffset);
+		RegisterElement(&orient_offset);
+
+		orient_dynamic.setup(XOR("dynamic offset"), XOR("orient_dynamic"));
+		orient_dynamic.AddShowCallback(callbacks::HasOrientOffset);
+		RegisterElement(&orient_dynamic);
+
+		orient_dyn_speed.setup(XOR("dynamic speed"), XOR("orient_dyn_speed"), 0.1f, 10.f, true, 1, 1.f, 0.1f);
+		orient_dyn_speed.AddShowCallback(callbacks::HasOrientOffset);
+		orient_dyn_speed.AddShowCallback(callbacks::IsOrientDynamic);
+		RegisterElement(&orient_dyn_speed);
+
+		orient_context.setup(XOR("context preset"), XOR("orient_ctx"),
+			{ XOR("standing"), XOR("moving"), XOR("jumping"), XOR("falling") });
+		orient_context.AddShowCallback(callbacks::HasOrientOffset);
+		RegisterElement(&orient_context);
+
+		// --- Horizontal control ---
+		horiz_enable.setup(XOR("horizontal control"), XOR("horiz_enable"));
+		RegisterElement(&horiz_enable);
+
+		horiz_max_turn.setup(XOR("max turn speed"), XOR("horiz_max_turn"), 1.f, 720.f, true, 0, 360.f, 10.f, XOR(L"\u00B0/s"));
+		horiz_max_turn.AddShowCallback(callbacks::HasHorizControl);
+		RegisterElement(&horiz_max_turn);
+
+		horiz_accel.setup(XOR("turn accel"), XOR("horiz_accel"), 0.f, 100.f, true, 0, 50.f, 5.f, XOR(L"%"));
+		horiz_accel.AddShowCallback(callbacks::HasHorizControl);
+		RegisterElement(&horiz_accel);
+
+		horiz_snap_steps.setup(XOR("snap steps"), XOR("horiz_snap"), 0.f, 90.f, true, 0, 0.f, 5.f, XOR(L"\u00B0"));
+		horiz_snap_steps.AddShowCallback(callbacks::HasHorizControl);
+		RegisterElement(&horiz_snap_steps);
+
+		horiz_smooth.setup(XOR("turn smoothing"), XOR("horiz_smooth"), 0.f, 100.f, true, 0, 0.f, 5.f, XOR(L"%"));
+		horiz_smooth.AddShowCallback(callbacks::HasHorizControl);
+		RegisterElement(&horiz_smooth);
+
+		horiz_invert.setup(XOR("invert horizontal"), XOR("horiz_invert"));
+		horiz_invert.AddShowCallback(callbacks::HasHorizControl);
+		RegisterElement(&horiz_invert);
+
+		// --- Vertical control ---
+		vert_enable.setup(XOR("vertical control"), XOR("vert_enable"));
+		RegisterElement(&vert_enable);
+
+		vert_pitch_up.setup(XOR("pitch limit up"), XOR("vert_up"), 0.f, 89.f, true, 0, 89.f, 1.f, XOR(L"\u00B0"));
+		vert_pitch_up.AddShowCallback(callbacks::HasVertControl);
+		RegisterElement(&vert_pitch_up);
+
+		vert_pitch_down.setup(XOR("pitch limit down"), XOR("vert_down"), 0.f, 89.f, true, 0, 89.f, 1.f, XOR(L"\u00B0"));
+		vert_pitch_down.AddShowCallback(callbacks::HasVertControl);
+		RegisterElement(&vert_pitch_down);
+
+		vert_bias.setup(XOR("pitch bias"), XOR("vert_bias"),
+			{ XOR("neutral"), XOR("prefer up"), XOR("prefer down") });
+		vert_bias.AddShowCallback(callbacks::HasVertControl);
+		RegisterElement(&vert_bias);
+
+		vert_smooth.setup(XOR("pitch smoothing"), XOR("vert_smooth"), 0.f, 100.f, true, 0, 0.f, 5.f, XOR(L"%"));
+		vert_smooth.AddShowCallback(callbacks::HasVertControl);
+		RegisterElement(&vert_smooth);
+
+		vert_react_speed.setup(XOR("pitch react speed"), XOR("vert_react"), 1.f, 100.f, true, 0, 50.f, 5.f, XOR(L"%"));
+		vert_react_speed.AddShowCallback(callbacks::HasVertControl);
+		RegisterElement(&vert_react_speed);
+
+		// ==================================================================
+		// Extended anti-aim customisation – col 2 (bottom section)
+		// ==================================================================
+
+		// --- State-based profiles ---
+		profile_select.setup(XOR("state profile"), XOR("prof_select"),
+			{ XOR("standing"), XOR("walking"), XOR("running"), XOR("crouching"),
+			  XOR("airborne"), XOR("landing"), XOR("custom A"), XOR("custom B"), XOR("custom C") });
+		RegisterElement(&profile_select, 1);
+
+		{
+			bool(*profCb[ 9 ])( ) = {
+				callbacks::IsProfileStand,  callbacks::IsProfileWalk,
+				callbacks::IsProfileRun,    callbacks::IsProfileCrouch,
+				callbacks::IsProfileAir,    callbacks::IsProfileLand,
+				callbacks::IsProfileCustomA, callbacks::IsProfileCustomB,
+				callbacks::IsProfileCustomC
+			};
+			const char* psfx[ 9 ] = {
+				"_ps", "_pw", "_pr", "_pc", "_pa", "_pl", "_pca", "_pcb", "_pcc"
+			};
+
+			for( int i = 0; i < 9; ++i ) {
+				std::string s = psfx[ i ];
+
+				profile_yaw_off[ i ].setup(XOR("yaw offset"), std::string("prof_yaw") + s,
+					-180.f, 180.f, true, 0, 0.f, 5.f, XOR(L"\u00B0"));
+				profile_yaw_off[ i ].AddShowCallback(profCb[ i ]);
+				RegisterElement(&profile_yaw_off[ i ], 1);
+
+				profile_pitch_off[ i ].setup(XOR("pitch offset"), std::string("prof_pitch") + s,
+					-89.f, 89.f, true, 0, 0.f, 1.f, XOR(L"\u00B0"));
+				profile_pitch_off[ i ].AddShowCallback(profCb[ i ]);
+				RegisterElement(&profile_pitch_off[ i ], 1);
+			}
+		}
+
+		profile_hotkey_a.setup(XOR("custom A hotkey"), XOR("prof_key_a"));
+		RegisterElement(&profile_hotkey_a, 1);
+
+		profile_hotkey_b.setup(XOR("custom B hotkey"), XOR("prof_key_b"));
+		RegisterElement(&profile_hotkey_b, 1);
+
+		profile_hotkey_c.setup(XOR("custom C hotkey"), XOR("prof_key_c"));
+		RegisterElement(&profile_hotkey_c, 1);
+
+		// --- Randomization ---
+		rand_enable.setup(XOR("randomization"), XOR("rand_enable"));
+		RegisterElement(&rand_enable, 1);
+
+		rand_offset_min.setup(XOR("rand offset min"), XOR("rand_off_min"), 0.f, 180.f, true, 0, 10.f, 5.f, XOR(L"\u00B0"));
+		rand_offset_min.AddShowCallback(callbacks::IsRandomEnabled);
+		RegisterElement(&rand_offset_min, 1);
+
+		rand_offset_max.setup(XOR("rand offset max"), XOR("rand_off_max"), 0.f, 180.f, true, 0, 90.f, 5.f, XOR(L"\u00B0"));
+		rand_offset_max.AddShowCallback(callbacks::IsRandomEnabled);
+		RegisterElement(&rand_offset_max, 1);
+
+		rand_interval_min.setup(XOR("rand interval min"), XOR("rand_int_min"), 50.f, 5000.f, true, 0, 200.f, 50.f, XOR(L" ms"));
+		rand_interval_min.AddShowCallback(callbacks::IsRandomEnabled);
+		RegisterElement(&rand_interval_min, 1);
+
+		rand_interval_max.setup(XOR("rand interval max"), XOR("rand_int_max"), 50.f, 5000.f, true, 0, 1000.f, 50.f, XOR(L" ms"));
+		rand_interval_max.AddShowCallback(callbacks::IsRandomEnabled);
+		RegisterElement(&rand_interval_max, 1);
+
+		rand_seed.setup(XOR("random seed"), XOR("rand_seed"), 0.f, 99999.f, true, 0, 0.f, 1.f);
+		rand_seed.AddShowCallback(callbacks::IsRandomEnabled);
+		RegisterElement(&rand_seed, 1);
+
+		rand_mode.setup(XOR("randomization mode"), XOR("rand_mode"),
+			{ XOR("continuous drift"), XOR("sudden pivot"), XOR("burst pattern") });
+		rand_mode.AddShowCallback(callbacks::IsRandomEnabled);
+		RegisterElement(&rand_mode, 1);
+
+		// --- Timeline editor ---
+		tl_enable.setup(XOR("timeline editor"), XOR("tl_enable"));
+		RegisterElement(&tl_enable, 1);
+
+		tl_kf_count.setup(XOR("keyframe count"), XOR("tl_kf_cnt"), 1.f, 4.f, true, 0, 2.f, 1.f);
+		tl_kf_count.AddShowCallback(callbacks::IsTimelineEnabled);
+		RegisterElement(&tl_kf_count, 1);
+
+		for( int i = 0; i < 4; ++i ) {
+			std::string idx = std::to_string( i );
+
+			tl_kf_time[ i ].setup(XOR("kf time"), std::string("tl_kft") + idx,
+				0.f, 10.f, true, 2, static_cast< float >( i ), 0.1f, XOR(L" s"));
+			tl_kf_time[ i ].AddShowCallback(callbacks::IsTimelineEnabled);
+			RegisterElement(&tl_kf_time[ i ], 1);
+
+			tl_kf_angle[ i ].setup(XOR("kf angle"), std::string("tl_kfa") + idx,
+				-180.f, 180.f, true, 0, 0.f, 5.f, XOR(L"\u00B0"));
+			tl_kf_angle[ i ].AddShowCallback(callbacks::IsTimelineEnabled);
+			RegisterElement(&tl_kf_angle[ i ], 1);
+
+			tl_kf_interp[ i ].setup(XOR("kf interp"), std::string("tl_kfi") + idx,
+				{ XOR("linear"), XOR("smoothstep"), XOR("exp in/out") });
+			tl_kf_interp[ i ].AddShowCallback(callbacks::IsTimelineEnabled);
+			RegisterElement(&tl_kf_interp[ i ], 1);
+		}
+
+		tl_loop.setup(XOR("loop mode"), XOR("tl_loop"),
+			{ XOR("no loop"), XOR("loop forward"), XOR("ping-pong") });
+		tl_loop.AddShowCallback(callbacks::IsTimelineEnabled);
+		RegisterElement(&tl_loop, 1);
+
+		tl_speed.setup(XOR("playback speed"), XOR("tl_speed"), 0.1f, 10.f, true, 1, 1.f, 0.1f, XOR(L"x"));
+		tl_speed.AddShowCallback(callbacks::IsTimelineEnabled);
+		RegisterElement(&tl_speed, 1);
+
+		// --- Input reaction ---
+		input_react_enable.setup(XOR("input reaction"), XOR("ir_enable"));
+		RegisterElement(&input_react_enable, 1);
+
+		input_react_move.setup(XOR("move reaction"), XOR("ir_move"), 0.f, 100.f, true, 0, 50.f, 5.f, XOR(L"%"));
+		input_react_move.AddShowCallback(callbacks::IsInputReactionOn);
+		RegisterElement(&input_react_move, 1);
+
+		input_react_mouse.setup(XOR("mouse reaction"), XOR("ir_mouse"), 0.f, 100.f, true, 0, 50.f, 5.f, XOR(L"%"));
+		input_react_mouse.AddShowCallback(callbacks::IsInputReactionOn);
+		RegisterElement(&input_react_mouse, 1);
+
+		input_react_delay.setup(XOR("react delay"), XOR("ir_delay"), 0.f, 1000.f, true, 0, 100.f, 10.f, XOR(L" ms"));
+		input_react_delay.AddShowCallback(callbacks::IsInputReactionOn);
+		RegisterElement(&input_react_delay, 1);
+
+		input_react_fwd.setup(XOR("fwd/back scale"), XOR("ir_fwd"), 0.f, 100.f, true, 0, 50.f, 5.f, XOR(L"%"));
+		input_react_fwd.AddShowCallback(callbacks::IsInputReactionOn);
+		RegisterElement(&input_react_fwd, 1);
+
+		input_react_side.setup(XOR("left/right scale"), XOR("ir_side"), 0.f, 100.f, true, 0, 50.f, 5.f, XOR(L"%"));
+		input_react_side.AddShowCallback(callbacks::IsInputReactionOn);
+		RegisterElement(&input_react_side, 1);
+
+		input_react_jump.setup(XOR("jump/crouch scale"), XOR("ir_jump"), 0.f, 100.f, true, 0, 50.f, 5.f, XOR(L"%"));
+		input_react_jump.AddShowCallback(callbacks::IsInputReactionOn);
+		RegisterElement(&input_react_jump, 1);
+
+		// --- Limits & safety ---
+		limits_enable.setup(XOR("limits & safety"), XOR("lim_enable"));
+		RegisterElement(&limits_enable, 1);
+
+		limits_clamp_min.setup(XOR("clamp min"), XOR("lim_min"), -180.f, 0.f, true, 0, -180.f, 5.f, XOR(L"\u00B0"));
+		limits_clamp_min.AddShowCallback(callbacks::IsLimitsEnabled);
+		RegisterElement(&limits_clamp_min, 1);
+
+		limits_clamp_max.setup(XOR("clamp max"), XOR("lim_max"), 0.f, 180.f, true, 0, 180.f, 5.f, XOR(L"\u00B0"));
+		limits_clamp_max.AddShowCallback(callbacks::IsLimitsEnabled);
+		RegisterElement(&limits_clamp_max, 1);
+
+		limits_max_rate.setup(XOR("max rate"), XOR("lim_rate"), 1.f, 1440.f, true, 0, 720.f, 10.f, XOR(L"\u00B0/s"));
+		limits_max_rate.AddShowCallback(callbacks::IsLimitsEnabled);
+		RegisterElement(&limits_max_rate, 1);
+
+		limits_reset_key.setup(XOR("reset angle key"), XOR("lim_reset_key"));
+		limits_reset_key.AddShowCallback(callbacks::IsLimitsEnabled);
+		RegisterElement(&limits_reset_key, 1);
+
+		auto_reset.setup(XOR("auto-reset"), XOR("auto_reset"));
+		auto_reset.AddShowCallback(callbacks::IsLimitsEnabled);
+		RegisterElement(&auto_reset, 1);
+
+		auto_reset_on.setup(XOR("auto-reset on"), XOR("auto_reset_on"),
+			{ XOR("round start"), XOR("teleport"), XOR("respawn"), XOR("config load") });
+		auto_reset_on.AddShowCallback(callbacks::IsLimitsEnabled);
+		auto_reset_on.AddShowCallback(callbacks::IsAutoResetOn);
+		RegisterElement(&auto_reset_on, 1);
+
+		// --- Visualization ---
+		vis_indicator.setup(XOR("aa indicator"), XOR("vis_indicator"));
+		RegisterElement(&vis_indicator, 1);
+
+		vis_style.setup(XOR("indicator style"), XOR("vis_style"),
+			{ XOR("arrow"), XOR("compass ring"), XOR("minimal marker") });
+		vis_style.AddShowCallback(callbacks::IsAAIndicatorOn);
+		RegisterElement(&vis_style, 1);
+
+		vis_size.setup(XOR("indicator size"), XOR("vis_size"), 4.f, 64.f, true, 0, 24.f, 2.f);
+		vis_size.AddShowCallback(callbacks::IsAAIndicatorOn);
+		RegisterElement(&vis_size, 1);
+
+		vis_opacity.setup(XOR("indicator opacity"), XOR("vis_opacity"), 0.f, 255.f, true, 0, 200.f, 5.f);
+		vis_opacity.AddShowCallback(callbacks::IsAAIndicatorOn);
+		RegisterElement(&vis_opacity, 1);
+
+		vis_color.setup(XOR("indicator color"), XOR("vis_color"), colors::white);
+		vis_color.AddShowCallback(callbacks::IsAAIndicatorOn);
+		RegisterElement(&vis_color, 1);
+
+		vis_debug_lines.setup(XOR("3d debug lines"), XOR("vis_dbg_lines"));
+		RegisterElement(&vis_debug_lines, 1);
+
+		// --- Preset management ---
+		preset_slot.setup(XOR("preset slot"), XOR("preset_slot"),
+			{ XOR("slot 1"), XOR("slot 2"), XOR("slot 3"), XOR("slot 4") });
+		RegisterElement(&preset_slot, 1);
+
+		preset_save.setup(XOR("save preset"));
+		preset_save.SetCallback(callbacks::AAPresetSave);
+		RegisterElement(&preset_save, 1);
+
+		preset_load.setup(XOR("load preset"));
+		preset_load.SetCallback(callbacks::AAPresetLoad);
+		RegisterElement(&preset_load, 1);
+
+		preset_reset.setup(XOR("reset to default"));
+		preset_reset.SetCallback(callbacks::AAPresetReset);
+		RegisterElement(&preset_reset, 1);
+
+		// --- Debug & logging ---
+		dbg_enable.setup(XOR("debug overlay"), XOR("dbg_enable"));
+		RegisterElement(&dbg_enable, 1);
+
+		dbg_show_angle.setup(XOR("show current angle"), XOR("dbg_angle"));
+		dbg_show_angle.AddShowCallback(callbacks::IsAADebugEnabled);
+		RegisterElement(&dbg_show_angle, 1);
+
+		dbg_show_target.setup(XOR("show target angle"), XOR("dbg_target"));
+		dbg_show_target.AddShowCallback(callbacks::IsAADebugEnabled);
+		RegisterElement(&dbg_show_target, 1);
+
+		dbg_show_mode.setup(XOR("show mode/profile"), XOR("dbg_mode"));
+		dbg_show_mode.AddShowCallback(callbacks::IsAADebugEnabled);
+		RegisterElement(&dbg_show_mode, 1);
+
+		dbg_log.setup(XOR("log to console"), XOR("dbg_log"));
+		dbg_log.AddShowCallback(callbacks::IsAADebugEnabled);
+		RegisterElement(&dbg_log, 1);
 
 		// col 2.
 		lag_enable.setup(XOR("fake-lag"), XOR("lag_enable"));
