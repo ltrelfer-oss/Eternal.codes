@@ -39,6 +39,367 @@ void HVH::AntiAimPitch( ) {
 	}
 }
 
+// ======================================================================
+// Extended anti-aim customisation methods
+// ======================================================================
+
+void HVH::ResetExtendedState( ) {
+	m_orient_offset     = 0.f;
+	m_horiz_current_yaw = 0.f;
+	m_horiz_velocity    = 0.f;
+	m_vert_current_pitch = 0.f;
+	m_ext_rand_next     = 0.f;
+	m_ext_rand_angle    = 0.f;
+	m_tl_start_time     = 0.f;
+	m_tl_forward        = true;
+	m_input_react_time  = 0.f;
+	m_input_yaw_contrib = 0.f;
+	m_prev_yaw          = 0.f;
+	m_active_profile    = 0;
+}
+
+int HVH::ResolveActiveProfile( ) {
+	// check custom profile hotkeys first
+	if( g_input.GetKeyState( g_menu.main.antiaim.profile_hotkey_a.get( ) ) )
+		return 6;
+	if( g_input.GetKeyState( g_menu.main.antiaim.profile_hotkey_b.get( ) ) )
+		return 7;
+	if( g_input.GetKeyState( g_menu.main.antiaim.profile_hotkey_c.get( ) ) )
+		return 8;
+
+	// auto-detect based on state
+	if( !( g_cl.m_flags & FL_ONGROUND ) ) {
+		// check if we just landed
+		return 4; // airborne
+	}
+
+	if( g_cl.m_local->m_bDucking( ) )
+		return 3; // crouching
+
+	if( g_cl.m_speed > 150.f )
+		return 2; // running
+
+	if( g_cl.m_speed > 0.1f )
+		return 1; // walking
+
+	return 0; // standing
+}
+
+void HVH::ApplyOrientationLayer( ) {
+	int mode = g_menu.main.antiaim.orient_mode.get( );
+	if( mode == 0 ) // neutral – no change
+		return;
+
+	float offset = g_menu.main.antiaim.orient_offset.get( );
+
+	switch( mode ) {
+	case 1: // defensive bias – offset towards cover
+		m_orient_offset = offset * 0.7f;
+		break;
+
+	case 2: // aggressive bias – offset towards enemy
+		m_orient_offset = offset * 1.3f;
+		break;
+
+	case 3: // randomized pattern
+		m_orient_offset = offset + g_csgo.RandomFloat( -30.f, 30.f );
+		break;
+
+	case 4: // scripted path – apply dynamic curve if enabled
+		if( g_menu.main.antiaim.orient_dynamic.get( ) ) {
+			float speed = g_menu.main.antiaim.orient_dyn_speed.get( );
+			m_orient_offset = offset * std::sin( g_csgo.m_globals->m_curtime * speed );
+		}
+		else
+			m_orient_offset = offset;
+		break;
+	}
+
+	g_cl.m_cmd->m_view_angles.y += m_orient_offset;
+}
+
+void HVH::ApplyHorizontalControl( float dt ) {
+	if( !g_menu.main.antiaim.horiz_enable.get( ) )
+		return;
+
+	float target_yaw = g_cl.m_cmd->m_view_angles.y;
+	float max_turn   = g_menu.main.antiaim.horiz_max_turn.get( );
+	float accel      = g_menu.main.antiaim.horiz_accel.get( ) / 100.f;
+	float smooth     = g_menu.main.antiaim.horiz_smooth.get( ) / 100.f;
+	float snap       = g_menu.main.antiaim.horiz_snap_steps.get( );
+	bool  invert     = g_menu.main.antiaim.horiz_invert.get( );
+
+	// snap to angle steps if enabled
+	if( snap > 0.f ) {
+		target_yaw = std::round( target_yaw / snap ) * snap;
+	}
+
+	// invert
+	if( invert ) {
+		float diff = math::NormalizedAngle( target_yaw - m_horiz_current_yaw );
+		target_yaw = m_horiz_current_yaw - diff;
+	}
+
+	// compute delta
+	float delta = math::NormalizedAngle( target_yaw - m_horiz_current_yaw );
+
+	// accelerate towards target
+	float desired_vel = delta / std::max( dt, 0.001f );
+	desired_vel = std::clamp( desired_vel, -max_turn, max_turn );
+
+	// blend velocity with acceleration
+	m_horiz_velocity += ( desired_vel - m_horiz_velocity ) * accel;
+	m_horiz_velocity = std::clamp( m_horiz_velocity, -max_turn, max_turn );
+
+	// apply smoothing
+	float step = m_horiz_velocity * dt;
+	float new_yaw = m_horiz_current_yaw + step;
+
+	// smooth blend
+	if( smooth > 0.f )
+		m_horiz_current_yaw += ( new_yaw - m_horiz_current_yaw ) * ( 1.f - smooth );
+	else
+		m_horiz_current_yaw = new_yaw;
+
+	math::NormalizeAngle( m_horiz_current_yaw );
+	g_cl.m_cmd->m_view_angles.y = m_horiz_current_yaw;
+}
+
+void HVH::ApplyVerticalControl( float dt ) {
+	if( !g_menu.main.antiaim.vert_enable.get( ) )
+		return;
+
+	float limit_up   = g_menu.main.antiaim.vert_pitch_up.get( );
+	float limit_down = g_menu.main.antiaim.vert_pitch_down.get( );
+	int   bias       = g_menu.main.antiaim.vert_bias.get( );
+	float smooth     = g_menu.main.antiaim.vert_smooth.get( ) / 100.f;
+	float react      = g_menu.main.antiaim.vert_react_speed.get( ) / 100.f;
+
+	float target_pitch = g_cl.m_cmd->m_view_angles.x;
+
+	// apply bias
+	if( bias == 1 ) // prefer up
+		target_pitch -= 15.f;
+	else if( bias == 2 ) // prefer down
+		target_pitch += 15.f;
+
+	// clamp to range
+	target_pitch = std::clamp( target_pitch, -limit_up, limit_down );
+
+	// smooth towards target
+	float blend = react * ( 1.f - smooth );
+	m_vert_current_pitch += ( target_pitch - m_vert_current_pitch ) * std::clamp( blend, 0.01f, 1.f );
+
+	g_cl.m_cmd->m_view_angles.x = m_vert_current_pitch;
+}
+
+void HVH::ApplyRandomization( float curtime ) {
+	if( !g_menu.main.antiaim.rand_enable.get( ) )
+		return;
+
+	float off_min  = g_menu.main.antiaim.rand_offset_min.get( );
+	float off_max  = g_menu.main.antiaim.rand_offset_max.get( );
+	float int_min  = g_menu.main.antiaim.rand_interval_min.get( ) / 1000.f;
+	float int_max  = g_menu.main.antiaim.rand_interval_max.get( ) / 1000.f;
+	int   mode     = g_menu.main.antiaim.rand_mode.get( );
+
+	if( curtime >= m_ext_rand_next ) {
+		float interval = g_csgo.RandomFloat( int_min, int_max );
+		m_ext_rand_next = curtime + interval;
+
+		float amplitude = g_csgo.RandomFloat( off_min, off_max );
+		float sign      = g_csgo.RandomFloat( -1.f, 1.f ) > 0.f ? 1.f : -1.f;
+
+		switch( mode ) {
+		case 0: // continuous drift
+			m_ext_rand_angle += sign * amplitude * 0.3f;
+			break;
+		case 1: // sudden pivot
+			m_ext_rand_angle = sign * amplitude;
+			break;
+		case 2: // burst pattern
+			m_ext_rand_angle = sign * amplitude;
+			break;
+		}
+	}
+
+	// for burst pattern, decay over time
+	if( mode == 2 ) {
+		m_ext_rand_angle *= 0.95f;
+	}
+
+	// clamp
+	m_ext_rand_angle = std::clamp( m_ext_rand_angle, -180.f, 180.f );
+
+	g_cl.m_cmd->m_view_angles.y += m_ext_rand_angle;
+}
+
+float HVH::EvaluateTimeline( float curtime ) {
+	if( !g_menu.main.antiaim.tl_enable.get( ) )
+		return 0.f;
+
+	int kf_count = static_cast< int >( g_menu.main.antiaim.tl_kf_count.get( ) );
+	if( kf_count < 1 )
+		return 0.f;
+
+	kf_count = std::min( kf_count, 4 );
+
+	float speed = g_menu.main.antiaim.tl_speed.get( );
+	int   loop  = g_menu.main.antiaim.tl_loop.get( );
+
+	if( m_tl_start_time <= 0.f )
+		m_tl_start_time = curtime;
+
+	// get the last keyframe time as total duration
+	float total_dur = g_menu.main.antiaim.tl_kf_time[ kf_count - 1 ].get( );
+	if( total_dur <= 0.f )
+		total_dur = 1.f;
+
+	float elapsed = ( curtime - m_tl_start_time ) * speed;
+
+	// handle looping
+	switch( loop ) {
+	case 0: // no loop
+		elapsed = std::min( elapsed, total_dur );
+		break;
+	case 1: // loop forward
+		elapsed = std::fmod( elapsed, total_dur );
+		break;
+	case 2: // ping-pong
+	{
+		float cycle = std::fmod( elapsed, total_dur * 2.f );
+		if( cycle > total_dur )
+			elapsed = total_dur * 2.f - cycle;
+		else
+			elapsed = cycle;
+		break;
+	}
+	}
+
+	// find the two keyframes we're between
+	int kf_a = 0, kf_b = 0;
+	for( int i = 0; i < kf_count; ++i ) {
+		if( g_menu.main.antiaim.tl_kf_time[ i ].get( ) <= elapsed )
+			kf_a = i;
+		else {
+			kf_b = i;
+			break;
+		}
+		kf_b = i;
+	}
+
+	float t_a = g_menu.main.antiaim.tl_kf_time[ kf_a ].get( );
+	float t_b = g_menu.main.antiaim.tl_kf_time[ kf_b ].get( );
+	float a_a = g_menu.main.antiaim.tl_kf_angle[ kf_a ].get( );
+	float a_b = g_menu.main.antiaim.tl_kf_angle[ kf_b ].get( );
+
+	if( kf_a == kf_b || t_b <= t_a )
+		return a_a;
+
+	float t = ( elapsed - t_a ) / ( t_b - t_a );
+	t = std::clamp( t, 0.f, 1.f );
+
+	// interpolation based on type
+	int interp = g_menu.main.antiaim.tl_kf_interp[ kf_a ].get( );
+	switch( interp ) {
+	case 0: // linear
+		break;
+	case 1: // smoothstep
+		t = t * t * ( 3.f - 2.f * t );
+		break;
+	case 2: // exponential in/out
+		if( t < 0.5f )
+			t = 0.5f * std::pow( 2.f, 20.f * t - 10.f );
+		else
+			t = 1.f - 0.5f * std::pow( 2.f, -20.f * t + 10.f );
+		break;
+	}
+
+	return a_a + ( a_b - a_a ) * t;
+}
+
+void HVH::ApplyInputReaction( float dt ) {
+	if( !g_menu.main.antiaim.input_react_enable.get( ) )
+		return;
+
+	float move_scale  = g_menu.main.antiaim.input_react_move.get( ) / 100.f;
+	float mouse_scale = g_menu.main.antiaim.input_react_mouse.get( ) / 100.f;
+	float delay       = g_menu.main.antiaim.input_react_delay.get( ) / 1000.f;
+	float fwd_scale   = g_menu.main.antiaim.input_react_fwd.get( ) / 100.f;
+	float side_scale  = g_menu.main.antiaim.input_react_side.get( ) / 100.f;
+	float jump_scale  = g_menu.main.antiaim.input_react_jump.get( ) / 100.f;
+
+	float curtime = g_csgo.m_globals->m_curtime;
+	float contrib = 0.f;
+
+	// movement key reactions
+	if( g_cl.m_cmd->m_buttons & IN_FORWARD )
+		contrib += 5.f * fwd_scale * move_scale;
+	if( g_cl.m_cmd->m_buttons & IN_BACK )
+		contrib -= 5.f * fwd_scale * move_scale;
+	if( g_cl.m_cmd->m_buttons & IN_MOVELEFT )
+		contrib += 5.f * side_scale * move_scale;
+	if( g_cl.m_cmd->m_buttons & IN_MOVERIGHT )
+		contrib -= 5.f * side_scale * move_scale;
+	if( g_cl.m_cmd->m_buttons & ( IN_JUMP | IN_DUCK ) )
+		contrib += 3.f * jump_scale * move_scale;
+
+	// mouse movement reaction
+	float mouse_delta = std::abs( g_cl.m_cmd->m_view_angles.y - m_prev_yaw );
+	contrib += mouse_delta * mouse_scale * 0.1f;
+
+	// apply delay
+	if( contrib != 0.f ) {
+		if( m_input_react_time <= 0.f )
+			m_input_react_time = curtime;
+
+		if( curtime - m_input_react_time >= delay )
+			m_input_yaw_contrib += contrib;
+	}
+	else {
+		m_input_react_time = 0.f;
+		m_input_yaw_contrib *= 0.9f; // decay
+	}
+
+	m_input_yaw_contrib = std::clamp( m_input_yaw_contrib, -90.f, 90.f );
+	g_cl.m_cmd->m_view_angles.y += m_input_yaw_contrib;
+}
+
+void HVH::ApplyLimitsAndSafety( float dt ) {
+	if( !g_menu.main.antiaim.limits_enable.get( ) )
+		return;
+
+	float clamp_min = g_menu.main.antiaim.limits_clamp_min.get( );
+	float clamp_max = g_menu.main.antiaim.limits_clamp_max.get( );
+	float max_rate  = g_menu.main.antiaim.limits_max_rate.get( );
+
+	// hard reset keybind
+	if( g_input.GetKeyState( g_menu.main.antiaim.limits_reset_key.get( ) ) ) {
+		g_cl.m_cmd->m_view_angles.y = 0.f;
+		m_horiz_current_yaw = 0.f;
+		m_vert_current_pitch = 0.f;
+		m_ext_rand_angle = 0.f;
+		m_input_yaw_contrib = 0.f;
+		return;
+	}
+
+	// clamp yaw to range
+	float yaw = g_cl.m_cmd->m_view_angles.y;
+	math::NormalizeAngle( yaw );
+	yaw = std::clamp( yaw, clamp_min, clamp_max );
+
+	// rate limit
+	if( dt > 0.f ) {
+		float delta = math::NormalizedAngle( yaw - m_prev_yaw );
+		float max_delta = max_rate * dt;
+		delta = std::clamp( delta, -max_delta, max_delta );
+		yaw = m_prev_yaw + delta;
+	}
+
+	math::NormalizeAngle( yaw );
+	g_cl.m_cmd->m_view_angles.y = yaw;
+}
+
 void HVH::AutoDirection( ) {
 	// constants.
 	constexpr float STEP{ 4.f };
@@ -698,6 +1059,44 @@ void HVH::AntiAim( ) {
 	// we have no real, but we do have a fake.
 	else if( g_menu.main.antiaim.fake_yaw.get( ) > 0 )
 		m_direction = g_cl.m_cmd->m_view_angles.y;
+
+	// ---- extended customisation pipeline ----
+	{
+		float dt = g_csgo.m_globals->m_interval;
+		float curtime = g_csgo.m_globals->m_curtime;
+
+		// resolve active profile and apply per-profile offsets
+		m_active_profile = ResolveActiveProfile( );
+		if( m_active_profile >= 0 && m_active_profile < 9 ) {
+			g_cl.m_cmd->m_view_angles.y += g_menu.main.antiaim.profile_yaw_off[ m_active_profile ].get( );
+			g_cl.m_cmd->m_view_angles.x += g_menu.main.antiaim.profile_pitch_off[ m_active_profile ].get( );
+		}
+
+		// orientation layer
+		ApplyOrientationLayer( );
+
+		// timeline editor
+		float tl_offset = EvaluateTimeline( curtime );
+		g_cl.m_cmd->m_view_angles.y += tl_offset;
+
+		// randomization (training/sandbox)
+		ApplyRandomization( curtime );
+
+		// input reaction
+		ApplyInputReaction( dt );
+
+		// horizontal control (smoothing, snapping, accel)
+		ApplyHorizontalControl( dt );
+
+		// vertical control (pitch limits, bias, smoothing)
+		ApplyVerticalControl( dt );
+
+		// limits & safety (clamp, rate limit, hard reset)
+		ApplyLimitsAndSafety( dt );
+
+		// save current yaw for next frame rate limiting
+		m_prev_yaw = g_cl.m_cmd->m_view_angles.y;
+	}
 
 	if( g_menu.main.antiaim.fake_yaw.get( ) ) {
 		// do not allow 2 consecutive sendpacket true if faking angles.

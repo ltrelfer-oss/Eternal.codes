@@ -56,7 +56,62 @@ namespace callbacks {
 	bool IsAdaptivePresetLowProf( );
 	bool IsAdaptivePresetHighPress( );
 	bool IsAdaptiveSwitchJitter( );
-	
+
+	// --- orientation ---
+	bool IsOrientModeRandom( );
+	bool IsOrientModeScripted( );
+	bool HasOrientOffset( );
+	bool IsOrientDynamic( );
+
+	// --- horizontal control ---
+	bool HasHorizControl( );
+	bool IsSnapToAngle( );
+
+	// --- vertical control ---
+	bool HasVertControl( );
+
+	// --- state profiles ---
+	bool IsProfileStand( );
+	bool IsProfileWalk( );
+	bool IsProfileRun( );
+	bool IsProfileCrouch( );
+	bool IsProfileAir( );
+	bool IsProfileLand( );
+	bool IsProfileCustomA( );
+	bool IsProfileCustomB( );
+	bool IsProfileCustomC( );
+
+	// --- randomization ---
+	bool IsRandomEnabled( );
+	bool IsRandModeDrift( );
+	bool IsRandModePivot( );
+	bool IsRandModeBurst( );
+
+	// --- timeline ---
+	bool IsTimelineEnabled( );
+
+	// --- input reaction ---
+	bool IsInputReactionOn( );
+
+	// --- limits & safety ---
+	bool IsLimitsEnabled( );
+	bool IsAutoResetOn( );
+
+	// --- visualization ---
+	bool IsAAIndicatorOn( );
+	bool IsIndicatorArrow( );
+	bool IsIndicatorCompass( );
+	bool IsIndicatorMinimal( );
+	bool IsDebugLinesOn( );
+
+	// --- debug ---
+	bool IsAADebugEnabled( );
+
+	// --- preset mgmt ---
+	void AAPresetSave( );
+	void AAPresetLoad( );
+	void AAPresetReset( );
+
 	bool IsConfigMM( );
 	bool IsConfigNS( );
 	bool IsConfig1( );

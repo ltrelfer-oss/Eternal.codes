@@ -20,6 +20,9 @@ void events::round_start( IGameEvent* evt ) {
 	g_hvh.m_next_random_update = 0.f;
 	g_hvh.m_auto_last = 0.f;
 
+	// reset extended aa state.
+	g_hvh.ResetExtendedState( );
+
 	// reset adaptive fakeyaw history.
 	g_adaptive_fakeyaw.Reset( );
 
