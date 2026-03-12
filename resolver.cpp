@@ -154,7 +154,7 @@ float Resolver::DetectDesyncFromLayers( AimPlayer* data, LagRecord* record ) {
 		float weight_delta = curr_layer->m_weight - prev_layer->m_weight;
 
 		// significant weight change indicates active adjustment.
-		if( std::abs( weight_delta ) > 0.0f ) {
+		if( std::abs( weight_delta ) > 0.01f ) {
 			// playback rate direction indicates desync side.
 			if( curr_layer->m_playback_rate > 0.f )
 				return -60.f;
