@@ -111,6 +111,10 @@ bool callbacks::IsMultipointBodyOn( ) {
 	return g_menu.main.aimbot.multipoint.get( 2 );
 }
 
+bool callbacks::IsResolverConfidenceOn( ) {
+	return g_menu.main.aimbot.correct.get( );
+}
+
 bool callbacks::IsAntiAimModeStand( ) {
 	return g_menu.main.antiaim.mode.get( ) == 0;
 }

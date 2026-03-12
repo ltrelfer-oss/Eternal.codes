@@ -57,6 +57,8 @@ public:
 	int m_stand_index2;
 	int m_body_index;
 
+	// animation resolver data.
+	float m_last_desync;
 
 	// data about the LBY proxy.
 	float m_body;
@@ -81,6 +83,7 @@ public:
 		m_walk_record  = LagRecord{};
 		m_shots        = 0;
 		m_missed_shots = 0;
+		m_last_desync  = 0.f;
 
 		m_records.clear( );
 		m_hitboxes.clear( );

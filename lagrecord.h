@@ -83,6 +83,7 @@ public:
 
 	// resolver stuff.
 	size_t m_mode;
+	size_t m_resolver_confidence;
 	bool   m_fake_walk;
 	bool   m_shot;
 	float  m_away;
@@ -98,6 +99,7 @@ public:
 		m_broke_lc{ false },
 		m_fake_walk{ false }, 
 		m_shot{ false }, 
+		m_resolver_confidence{},
 		m_lag{}, 
 		m_bones{} {}
 
@@ -107,6 +109,7 @@ public:
 		m_broke_lc{ false },
 		m_fake_walk{ false },
 		m_shot{ false }, 
+		m_resolver_confidence{},
 		m_lag{}, 
 		m_bones{} {
 
