@@ -188,6 +188,10 @@ void Shots::OnImpact( IGameEvent *evt ) {
 		else if ( mode == Resolver::Modes::RESOLVE_STAND2 )
 			++data->m_stand_index2;
 
+		// animation-based resolve missed, reset cached desync.
+		else if ( mode == Resolver::Modes::RESOLVE_ANIM )
+			data->m_last_desync = 0.f;
+
 		++data->m_missed_shots;
 	}
 

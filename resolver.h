@@ -13,6 +13,13 @@ public:
 		RESOLVE_AIR,
 		RESOLVE_BODY,
 		RESOLVE_STOPPED_MOVING,
+		RESOLVE_ANIM,
+	};
+
+	enum Confidence : size_t {
+		CONFIDENCE_LOW = 0,
+		CONFIDENCE_MEDIUM,
+		CONFIDENCE_HIGH,
 	};
 
 public:
@@ -34,7 +41,11 @@ public:
 	void ResolveAir( AimPlayer* data, LagRecord* record );
 
 	void AirNS( AimPlayer* data, LagRecord* record );
+	void ResolveAnimations( AimPlayer* data, LagRecord* record );
 	void ResolvePoses( Player* player, LagRecord* record );
+
+	float DetectDesyncFromLayers( AimPlayer* data, LagRecord* record );
+	size_t ComputeConfidence( AimPlayer* data, LagRecord* record );
 
 public:
 	std::array< vec3_t, 64 > m_impacts;

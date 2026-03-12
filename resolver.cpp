@@ -22,9 +22,16 @@ LagRecord* Resolver::FindIdealRecord( AimPlayer* data ) {
         if( !first_valid )
             first_valid = current;
 
-        // try to find a record with a shot, lby update, walking or no anti-aim.
-		if( it->m_shot || it->m_mode == Modes::RESOLVE_BODY || it->m_mode == Modes::RESOLVE_WALK || it->m_mode == Modes::RESOLVE_NONE )
+        // try to find a record with a shot, lby update, walking, animation-based, or no anti-aim.
+		if( it->m_shot || it->m_mode == Modes::RESOLVE_BODY || it->m_mode == Modes::RESOLVE_WALK || it->m_mode == Modes::RESOLVE_NONE || it->m_mode == Modes::RESOLVE_ANIM )
             return current;
+
+		// if confidence flag is enabled, prefer higher confidence records.
+		if( g_menu.main.aimbot.resolver_confidence.get( ) > 0 ) {
+			size_t min_conf = g_menu.main.aimbot.resolver_confidence.get( ) - 1;
+			if( it->m_resolver_confidence >= min_conf )
+				return current;
+		}
 	}
 
 	// none found above, return the first valid record if possible.
@@ -50,6 +57,21 @@ LagRecord* Resolver::FindLastRecord( AimPlayer* data ) {
 	return nullptr;
 }
 
+LagRecord* Resolver::FindFirstRecord( AimPlayer* data ) {
+	if( data->m_records.empty( ) )
+		return nullptr;
+
+	// iterate records from oldest to newest.
+	for( auto it = data->m_records.crbegin( ); it != data->m_records.crend( ); ++it ) {
+		LagRecord* current = it->get( );
+
+		if( current->valid( ) && !current->immune( ) && !current->dormant( ) )
+			return current;
+	}
+
+	return nullptr;
+}
+
 void Resolver::OnBodyUpdate( Player* player, float value ) {
 	AimPlayer* data = &g_aimbot.m_players[ player->index( ) - 1 ];
 
@@ -59,49 +81,10 @@ void Resolver::OnBodyUpdate( Player* player, float value ) {
 }
 
 float Resolver::GetAwayAngle( LagRecord* record ) {
-	float  delta{ std::numeric_limits< float >::max( ) };
-	vec3_t pos;
 	ang_t  away;
 
-	// other cheats predict you by their own latency.
-	// they do this because, then they can put their away angle to exactly
-	// where you are on the server at that moment in time.
-
-	// the idea is that you would need to know where they 'saw' you when they created their user-command.
-	// lets say you move on your client right now, this would take half of our latency to arrive at the server.
-	// the delay between the server and the target client is compensated by themselves already, that is fortunate for us.
-
-	// we have no historical origins.
-	// no choice but to use the most recent one.
-	//if( g_cl.m_net_pos.empty( ) ) {
-		math::VectorAngles( g_cl.m_local->m_vecOrigin( ) - record->m_pred_origin, away );
-		return away.y;
-	//}
-
-	// half of our rtt.
-	// also known as the one-way delay.
-	//float owd = ( g_cl.m_latency / 2.f );
-
-	// since our origins are computed here on the client
-	// we have to compensate for the delay between our client and the server
-	// therefore the OWD should be subtracted from the target time.
-	//float target = record->m_pred_time; //- owd;
-
-	// iterate all.
-	//for( const auto &net : g_cl.m_net_pos ) {
-		// get the delta between this records time context
-		// and the target time.
-	//	float dt = std::abs( target - net.m_time );
-
-		// the best origin.
-	//	if( dt < delta ) {
-	//		delta = dt;
-	//		pos   = net.m_pos;
-	//	}
-	//}
-
-	//math::VectorAngles( pos - record->m_pred_origin, away );
-	//return away.y;
+	math::VectorAngles( g_cl.m_local->m_vecOrigin( ) - record->m_pred_origin, away );
+	return away.y;
 }
 
 void Resolver::MatchShot( AimPlayer* data, LagRecord* record ) {
@@ -134,10 +117,6 @@ void Resolver::MatchShot( AimPlayer* data, LagRecord* record ) {
 }
 
 void Resolver::SetMode( LagRecord* record ) {
-	// the resolver has 3 modes to chose from.
-	// these modes will vary more under the hood depending on what data we have about the player
-	// and what kind of hack vs. hack we are playing (mm/nospread).
-
 	float speed = record->m_anim_velocity.length( );
 
 	// if on ground, moving, and not fakewalking.
@@ -153,6 +132,76 @@ void Resolver::SetMode( LagRecord* record ) {
 		record->m_mode = Modes::RESOLVE_AIR;
 }
 
+float Resolver::DetectDesyncFromLayers( AimPlayer* data, LagRecord* record ) {
+	// need previous records for comparison.
+	if( data->m_records.size( ) < 2 )
+		return 0.f;
+
+	LagRecord* previous = data->m_records[ 1 ].get( );
+	if( !previous || previous->dormant( ) )
+		return 0.f;
+
+	// analyze layer 3 (body adjust/lean layer).
+	C_AnimationLayer* curr_layer = &record->m_layers[ 3 ];
+	C_AnimationLayer* prev_layer = &previous->m_layers[ 3 ];
+
+	int act = data->m_player->GetSequenceActivity( curr_layer->m_sequence );
+
+	// ACT_CSGO_IDLE_TURN_BALANCEADJUST = 980
+	// ACT_CSGO_IDLE_ADJUST_STOPPEDMOVING = 979
+	// these activities fire when the body adjusts to match actual yaw.
+	if( act == 979 || act == 980 ) {
+		float weight_delta = curr_layer->m_weight - prev_layer->m_weight;
+
+		// significant weight change indicates active adjustment.
+		if( std::abs( weight_delta ) > 0.0f ) {
+			// playback rate direction indicates desync side.
+			if( curr_layer->m_playback_rate > 0.f )
+				return -60.f;
+			else if( curr_layer->m_playback_rate < 0.f )
+				return 60.f;
+		}
+
+		// cycle progression can also indicate direction.
+		if( curr_layer->m_weight > 0.f && curr_layer->m_cycle > prev_layer->m_cycle ) {
+			return curr_layer->m_playback_rate > 0.f ? -58.f : 58.f;
+		}
+	}
+
+	// analyze layer 12 weight delta for lean direction.
+	float lean_delta = record->m_layers[ 12 ].m_weight - previous->m_layers[ 12 ].m_weight;
+	if( std::abs( lean_delta ) > 0.01f ) {
+		return lean_delta > 0.f ? 58.f : -58.f;
+	}
+
+	// check if we have a cached desync from previous detections.
+	if( std::abs( data->m_last_desync ) > 1.f )
+		return data->m_last_desync;
+
+	return 0.f;
+}
+
+size_t Resolver::ComputeConfidence( AimPlayer* data, LagRecord* record ) {
+	// walking - LBY is reliable.
+	if( record->m_mode == Modes::RESOLVE_WALK || record->m_mode == Modes::RESOLVE_NONE )
+		return Confidence::CONFIDENCE_HIGH;
+
+	// body update was recently detected.
+	if( record->m_mode == Modes::RESOLVE_BODY || record->m_mode == Modes::RESOLVE_STOPPED_MOVING )
+		return Confidence::CONFIDENCE_HIGH;
+
+	// animation layer analysis gave us a direction.
+	if( record->m_mode == Modes::RESOLVE_ANIM )
+		return Confidence::CONFIDENCE_MEDIUM;
+
+	// stand with known move context.
+	if( record->m_mode == Modes::RESOLVE_STAND1 )
+		return Confidence::CONFIDENCE_MEDIUM;
+
+	// everything else is low confidence bruteforce.
+	return Confidence::CONFIDENCE_LOW;
+}
+
 void Resolver::ResolveAngles( Player* player, LagRecord* record ) {
 	AimPlayer* data = &g_aimbot.m_players[ player->index( ) - 1 ];
 
@@ -163,12 +212,10 @@ void Resolver::ResolveAngles( Player* player, LagRecord* record ) {
 	SetMode( record );
 
 	// if we are in nospread mode, force all players pitches to down.
-	// TODO; we should check thei actual pitch and up too, since those are the other 2 possible angles.
-	// this should be somehow combined into some iteration that matches with the air angle iteration.
 	if( g_menu.main.config.mode.get( ) == 1 )
 		record->m_eye_angles.x = 90.f;
 
-	// we arrived here we can do the acutal resolve.
+	// we arrived here we can do the actual resolve.
 	if( record->m_mode == Modes::RESOLVE_WALK ) 
 		ResolveWalk( data, record );
 
@@ -178,7 +225,10 @@ void Resolver::ResolveAngles( Player* player, LagRecord* record ) {
 	else if( record->m_mode == Modes::RESOLVE_AIR )
 		ResolveAir( data, record );
 
-	// normalize the eye angles, doesn't really matter but its clean.
+	// compute and store the confidence level for this record.
+	record->m_resolver_confidence = ComputeConfidence( data, record );
+
+	// normalize the eye angles.
 	math::NormalizeAngle( record->m_eye_angles.y );
 }
 
@@ -193,6 +243,7 @@ void Resolver::ResolveWalk( AimPlayer* data, LagRecord* record ) {
 	data->m_stand_index  = 0;
 	data->m_stand_index2 = 0;
 	data->m_body_index   = 0;
+	data->m_last_desync  = 0.f;
 
 	// copy the last record that this player was walking
 	// we need it later on because it gives us crucial data.
@@ -200,7 +251,7 @@ void Resolver::ResolveWalk( AimPlayer* data, LagRecord* record ) {
 }
 
 void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
-	// for no-spread call a seperate resolver.
+	// for no-spread call a separate resolver.
 	if( g_menu.main.config.mode.get( ) == 1 ) {
 		StandNS( data, record );
 		return;
@@ -211,6 +262,13 @@ void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 
 	// pointer for easy access.
 	LagRecord* move = &data->m_walk_record;
+
+	// try animation-based desync detection first.
+	float desync = DetectDesyncFromLayers( data, record );
+
+	// cache desync for future use.
+	if( std::abs( desync ) > 1.f )
+		data->m_last_desync = desync;
 
 	// we have a valid moving record.
 	if( move->m_sim_time > 0.f ) {
@@ -226,10 +284,10 @@ void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 	// a valid moving context was found
 	if( data->m_moved ) {
 		float diff = math::NormalizedAngle( record->m_body - move->m_body );
-		float delta = record->m_anim_time - move->m_anim_time;
+		float time_delta = record->m_anim_time - move->m_anim_time;
 
 		// it has not been time for this first update yet.
-		if( delta < 0.22f ) {
+		if( time_delta < 0.22f ) {
 			// set angles to current LBY.
 			record->m_eye_angles.y = move->m_body;
 
@@ -257,36 +315,50 @@ void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 				return;
 			}
 
+			// body index exceeded: try animation-based resolution.
+			if( std::abs( desync ) > 1.f ) {
+				record->m_mode = Modes::RESOLVE_ANIM;
+				record->m_eye_angles.y = record->m_body + desync;
+				return;
+			}
+
 			// set to stand1 -> known last move.
 			record->m_mode = Modes::RESOLVE_STAND1;
 
 			C_AnimationLayer* curr = &record->m_layers[ 3 ];
 			int act = data->m_player->GetSequenceActivity( curr->m_sequence );
 
-			// ok, no fucking update. apply big resolver.
-			record->m_eye_angles.y = move->m_body;
-
-			// every third shot do some fuckery.
-			if ( !( data->m_stand_index % 3 ) )
-				record->m_eye_angles.y += g_csgo.RandomFloat( -35.f, 35.f );
-
-			// jesus we can fucking stop missing can we?
-			if( data->m_stand_index > 6 && act != 980 ) {
-				// lets just hope they switched ang after move.
+			// bruteforce with move context.
+			switch( data->m_stand_index % 5 ) {
+			case 0:
+				record->m_eye_angles.y = move->m_body;
+				break;
+			case 1:
 				record->m_eye_angles.y = move->m_body + 180.f;
-			}
-
-			// we missed 4 shots.
-			else if( data->m_stand_index > 4 && act != 980 ) {
-				// try backwards.
+				break;
+			case 2:
+				record->m_eye_angles.y = away + 90.f;
+				break;
+			case 3:
+				record->m_eye_angles.y = away - 90.f;
+				break;
+			case 4:
 				record->m_eye_angles.y = away + 180.f;
+				break;
 			}
 
 			return;
 		}
 	}
 
-	// stand2 -> no known last move.
+	// no known move context: try animation-based resolution.
+	if( std::abs( desync ) > 1.f ) {
+		record->m_mode = Modes::RESOLVE_ANIM;
+		record->m_eye_angles.y = record->m_body + desync;
+		return;
+	}
+
+	// stand2 -> no known last move, pure bruteforce.
 	record->m_mode = Modes::RESOLVE_STAND2;
 
 	switch( data->m_stand_index2 % 6 ) {
@@ -304,11 +376,11 @@ void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 		break;
 
 	case 3:
-		record->m_eye_angles.y = record->m_body + 110.f;
+		record->m_eye_angles.y = away + 110.f;
 		break;
 
 	case 4:
-		record->m_eye_angles.y = record->m_body - 110.f;
+		record->m_eye_angles.y = away - 110.f;
 		break;
 
 	case 5:
@@ -323,6 +395,15 @@ void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 void Resolver::StandNS( AimPlayer* data, LagRecord* record ) {
 	// get away angles.
 	float away = GetAwayAngle( record );
+
+	// try animation-based desync detection for nospread too.
+	float desync = DetectDesyncFromLayers( data, record );
+	if( std::abs( desync ) > 1.f ) {
+		record->m_mode = Modes::RESOLVE_ANIM;
+		record->m_eye_angles.y = away + desync;
+		record->m_body = record->m_eye_angles.y;
+		return;
+	}
 
 	switch( data->m_shots % 8 ) {
 	case 0:
@@ -363,21 +444,15 @@ void Resolver::StandNS( AimPlayer* data, LagRecord* record ) {
 }
 
 void Resolver::ResolveAir( AimPlayer* data, LagRecord* record ) {
-	// for no-spread call a seperate resolver.
+	// for no-spread call a separate resolver.
 	if( g_menu.main.config.mode.get( ) == 1 ) {
 		AirNS( data, record );
 		return;
 	}
 
-	// else run our matchmaking air resolver.
-
-	// we have barely any speed. 
+	// we have barely any speed.
 	// either we jumped in place or we just left the ground.
-	// or someone is trying to fool our resolver.
 	if( record->m_velocity.length_2d( ) < 60.f ) {
-		// set this for completion.
-		// so the shot parsing wont pick the hits / misses up.
-		// and process them wrongly.
 		record->m_mode = Modes::RESOLVE_STAND;
 
 		// invoke our stand resolver.
@@ -387,21 +462,38 @@ void Resolver::ResolveAir( AimPlayer* data, LagRecord* record ) {
 		return;
 	}
 
-	// try to predict the direction of the player based on his velocity direction.
-	// this should be a rough estimation of where he is looking.
 	float velyaw = math::rad_to_deg( std::atan2( record->m_velocity.y, record->m_velocity.x ) );
+	float away = GetAwayAngle( record );
 
-	switch( data->m_shots % 3 ) {
+	// try animation-based desync detection.
+	float desync = DetectDesyncFromLayers( data, record );
+	if( std::abs( desync ) > 1.f ) {
+		record->m_mode = Modes::RESOLVE_ANIM;
+		record->m_eye_angles.y = velyaw + desync;
+		data->m_last_desync = desync;
+		return;
+	}
+
+	// bruteforce using velocity direction and away angle.
+	switch( data->m_shots % 5 ) {
 	case 0:
 		record->m_eye_angles.y = velyaw + 180.f;
 		break;
 
 	case 1:
-		record->m_eye_angles.y = velyaw - 90.f;
+		record->m_eye_angles.y = away + 180.f;
 		break;
 
 	case 2:
+		record->m_eye_angles.y = velyaw - 90.f;
+		break;
+
+	case 3:
 		record->m_eye_angles.y = velyaw + 90.f;
+		break;
+
+	case 4:
+		record->m_eye_angles.y = away;
 		break;
 	}
 }
@@ -409,6 +501,14 @@ void Resolver::ResolveAir( AimPlayer* data, LagRecord* record ) {
 void Resolver::AirNS( AimPlayer* data, LagRecord* record ) {
 	// get away angles.
 	float away = GetAwayAngle( record );
+
+	// try animation-based desync detection for nospread too.
+	float desync = DetectDesyncFromLayers( data, record );
+	if( std::abs( desync ) > 1.f ) {
+		record->m_mode = Modes::RESOLVE_ANIM;
+		record->m_eye_angles.y = away + desync;
+		return;
+	}
 
 	switch( data->m_shots % 9 ) {
 	case 0:
@@ -448,17 +548,42 @@ void Resolver::AirNS( AimPlayer* data, LagRecord* record ) {
 	}
 }
 
+void Resolver::ResolveAnimations( AimPlayer* data, LagRecord* record ) {
+	float away = GetAwayAngle( record );
+	float desync = DetectDesyncFromLayers( data, record );
+
+	if( std::abs( desync ) > 1.f ) {
+		// we detected a desync direction from animation layers.
+		record->m_mode = Modes::RESOLVE_ANIM;
+		record->m_eye_angles.y = record->m_body + desync;
+		data->m_last_desync = desync;
+		return;
+	}
+
+	// fallback: could not determine from animations.
+	record->m_eye_angles.y = away + 180.f;
+}
+
 void Resolver::ResolvePoses( Player* player, LagRecord* record ) {
 	AimPlayer* data = &g_aimbot.m_players[ player->index( ) - 1 ];
 
 	// only do this bs when in air.
 	if( record->m_mode == Modes::RESOLVE_AIR ) {
-		// ang = pose min + pose val x ( pose range )
-
 		// lean_yaw
 		player->m_flPoseParameter( )[ 2 ]  = g_csgo.RandomInt( 0, 4 ) * 0.25f;   
 
 		// body_yaw
 		player->m_flPoseParameter( )[ 11 ] = g_csgo.RandomInt( 1, 3 ) * 0.25f;
+	}
+
+	// for animation-resolved records, set body_yaw based on detected desync.
+	if( record->m_mode == Modes::RESOLVE_ANIM ) {
+		float desync = data->m_last_desync;
+		if( std::abs( desync ) > 1.f ) {
+			// map desync angle to pose parameter range [0, 1].
+			float pose = 0.5f + ( desync / 120.f ) * 0.5f;
+			math::clamp( pose, 0.f, 1.f );
+			player->m_flPoseParameter( )[ 11 ] = pose;
+		}
 	}
 }

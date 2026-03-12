@@ -312,6 +312,9 @@ void AimPlayer::OnRoundStart(Player* player) {
 	m_stand_index2 = 0;
 	m_body_index = 0;
 
+	// reset animation resolver data.
+	m_last_desync = 0.f;
+
 	m_records.clear();
 	m_hitboxes.clear();
 
