@@ -33,6 +33,18 @@ public:
 	void MatchShot( AimPlayer* data, LagRecord* record );
 	void SetMode( LagRecord* record );
 
+	// learning core: candidate angle tables + score-based slot selection.
+	// gamesense-style; the resolver converges on what lands per player instead
+	// of blindly cycling angles by shot count.
+	int   SelectSlot( const float* scores, int n );
+	float CandidateStand( float base, float maxdesync, float away, int side, int slot );
+	float CandidateStandNS( float away, int slot );
+	float CandidateAir( float ref, int slot );
+
+	// hit / miss feedback applied from shots.cpp - rewards / penalizes the
+	// exact candidate slot the record was resolved with.
+	void  ResolverFeedback( AimPlayer* data, LagRecord* record, bool hit, bool head );
+
 	void ResolveAngles( Player* player, LagRecord* record );
 	void ResolveWalk( AimPlayer* data, LagRecord* record );
 	void ResolveStand( AimPlayer* data, LagRecord* record );

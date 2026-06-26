@@ -4,6 +4,7 @@
 #define SLIDER_HEIGHT	8
 
 class Slider : public Element {
+	friend class ImGuiMenu;
 public:
 	__forceinline Slider( ) : m_drag{ false }, m_value{}, m_min{}, m_max{}, m_step{}, m_fill{}, m_precision{}, m_label{}, m_suffix{}, m_offset{} {
 		m_flags = ElementFlags::DRAW | ElementFlags::CLICK | ElementFlags::SAVE;

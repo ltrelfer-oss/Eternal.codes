@@ -1,6 +1,7 @@
 #pragma once
 
 class MultiDropdown : public Element {
+	friend class ImGuiMenu;
 public:
 	__forceinline MultiDropdown( ) : m_open{ false }, m_label{}, m_anim_height{}, m_active_items{}, m_offset{} {
 		m_flags = ElementFlags::DRAW | ElementFlags::CLICK | ElementFlags::ACTIVE | ElementFlags::SAVE;

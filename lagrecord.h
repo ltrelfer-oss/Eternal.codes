@@ -88,6 +88,11 @@ public:
 	float  m_away;
 	float  m_anim_time;
 
+	// learning resolver: which candidate slot this record's yaw / pitch
+	// was resolved with, so hit / miss feedback can reward the right one.
+	int    m_resolve_index;
+	int    m_pitch_idx;
+
 	// other stuff.
 	float  m_interp_time;
 public:
@@ -98,6 +103,8 @@ public:
 		m_broke_lc{ false },
 		m_fake_walk{ false }, 
 		m_shot{ false }, 
+		m_resolve_index{ 0 },
+		m_pitch_idx{ 0 },
 		m_lag{}, 
 		m_bones{} {}
 
@@ -107,6 +114,8 @@ public:
 		m_broke_lc{ false },
 		m_fake_walk{ false },
 		m_shot{ false }, 
+		m_resolve_index{ 0 },
+		m_pitch_idx{ 0 },
 		m_lag{}, 
 		m_bones{} {
 

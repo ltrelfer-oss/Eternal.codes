@@ -5,6 +5,7 @@
 #define EDIT_ITEM_X_OFFSET 10
 
 class Edit : public Element {
+	friend class ImGuiMenu;
 public:
 	// ctor.
 	__forceinline Edit( ) : m_text{}, m_limit{}, m_typing{ false }, m_old_typing{ false } {

@@ -67,6 +67,16 @@ public:
 	bool  m_has_stand;    // whether a learned stand offset exists.
 	bool  m_has_air;      // whether a learned air offset exists.
 
+	// learning resolver: instead of cycling candidate angles at random, each
+	// candidate slot accumulates a score. hits reward the used slot, misses
+	// penalize it, so the resolver converges on what actually lands per player.
+	static const int STAND_SLOTS = 8; // 6 used in mm, 8 in nospread.
+	static const int AIR_SLOTS   = 9; // 3 used in mm, 9 in nospread.
+	static const int PITCH_SLOTS = 3; // zero / fake-down / fake-up.
+	float m_stand_score[ STAND_SLOTS ];
+	float m_air_score[ AIR_SLOTS ];
+	float m_pitch_score[ PITCH_SLOTS ];
+
 	// rotation ( spin / jitter ) detection state.
 	float m_last_eye_yaw; // eye yaw of the previous resolved record.
 	float m_yaw_rate;     // smoothed per-tick yaw delta ( deg ).
@@ -103,6 +113,10 @@ public:
 		m_has_air      = false;
 		m_last_eye_yaw = 0.f;
 		m_yaw_rate     = 0.f;
+
+		for( int i = 0; i < STAND_SLOTS; ++i ) m_stand_score[ i ] = 0.f;
+		for( int i = 0; i < AIR_SLOTS;   ++i ) m_air_score[ i ]   = 0.f;
+		for( int i = 0; i < PITCH_SLOTS; ++i ) m_pitch_score[ i ] = 0.f;
 
 		m_records.clear( );
 		m_hitboxes.clear( );

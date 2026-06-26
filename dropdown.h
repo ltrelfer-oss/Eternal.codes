@@ -8,6 +8,7 @@
 #define DROPDOWN_SEPARATOR		2
 
 class Dropdown : public Element {
+	friend class ImGuiMenu;
 public:
 	__forceinline Dropdown( ) : m_open{ false }, m_label{}, m_items{}, m_anim_height{}, m_active_item{}, m_offset{} {
 		m_flags = ElementFlags::DRAW | ElementFlags::CLICK | ElementFlags::ACTIVE | ElementFlags::SAVE | ElementFlags::DEACIVATE;

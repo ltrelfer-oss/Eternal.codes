@@ -6,6 +6,7 @@
 
 class Keybind : public Element {
 	friend class GUI;
+	friend class ImGuiMenu;
 
 	using ToggleCallback_t = void( *)( );
 

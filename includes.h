@@ -108,4 +108,5 @@ using ulong_t = unsigned long;
 #include "gui.h"
 #include "callbacks.h"
 #include "menu.h"
+#include "imgui_menu.h"
 #include "config.h"

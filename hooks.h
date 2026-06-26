@@ -98,6 +98,15 @@ public:
 
 	static LRESULT WINAPI WndProc( HWND wnd, uint32_t msg, WPARAM wp, LPARAM lp );
 
+	// d3d9 (imgui) hooks - implemented in d3d9.cpp.
+	using EndScene_t = long( __stdcall* )( void* );
+	using Reset_t    = long( __stdcall* )( void*, void* );
+
+	static long __stdcall EndScene( void* device );
+	static long __stdcall Reset( void* device, void* params );
+
+	void InitD3D( );
+
 public:
 	// vmts.
 	VMT m_panel;
@@ -127,6 +136,10 @@ public:
 
 	// wndproc old ptr.
 	WNDPROC m_old_wndproc;
+
+	// d3d9 originals.
+	EndScene_t m_EndScene_original;
+	Reset_t    m_Reset_original;
 
 	// old player create fn.
 	DoExtraBoneProcessing_t     m_DoExtraBoneProcessing;

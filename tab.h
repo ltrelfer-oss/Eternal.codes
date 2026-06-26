@@ -10,6 +10,7 @@
 class Tab {
 	friend class Form;
 	friend class GUI;
+	friend class ImGuiMenu;
 	friend class Config;
 
 private:

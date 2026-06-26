@@ -1,6 +1,7 @@
 #pragma once
 
 class GUI {
+	friend class ImGuiMenu;
 private:
 	std::vector< Form* > m_forms;
 

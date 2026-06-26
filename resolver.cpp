@@ -139,6 +139,118 @@ float Resolver::AnimationSide( AimPlayer* data, LagRecord* record ) {
 	return 0.f;
 }
 
+// pick the highest-scoring candidate slot. a tiny index penalty breaks ties
+// toward lower ( more likely ) slots, which also gives a deterministic
+// cold-start ordering before any feedback has been learned.
+int Resolver::SelectSlot( const float* scores, int n ) {
+	int   best = 0;
+	float best_val = scores[ 0 ];
+
+	for( int i = 1; i < n; ++i ) {
+		float val = scores[ i ] - ( float )i * 0.01f;
+		if( val > best_val ) {
+			best_val = val;
+			best     = i;
+		}
+	}
+
+	return best;
+}
+
+// matchmaking stand candidate table ( lby-centered ), ordered by likelihood.
+float Resolver::CandidateStand( float base, float maxdesync, float away, int side, int slot ) {
+	switch( slot ) {
+	case 0:  return base + side * maxdesync;          // seeded side, max desync.
+	case 1:  return base - side * maxdesync;          // opposite side, max desync.
+	case 2:  return base + side * maxdesync * 0.5f;   // seeded side, half desync.
+	case 3:  return base - side * maxdesync * 0.5f;   // opposite side, half desync.
+	case 4:  return base;                             // zero desync ( facing lby ).
+	case 5:  return base + 180.f;                     // flipped lby.
+	case 6:  return away + 180.f;                     // away-based backwards.
+	case 7:  return away;                             // straight at us.
+	default: return base;
+	}
+}
+
+// nospread stand candidate table ( away-centered true bruteforce ).
+float Resolver::CandidateStandNS( float away, int slot ) {
+	switch( slot ) {
+	case 0:  return away + 180.f;
+	case 1:  return away + 90.f;
+	case 2:  return away - 90.f;
+	case 3:  return away + 45.f;
+	case 4:  return away - 45.f;
+	case 5:  return away + 135.f;
+	case 6:  return away - 135.f;
+	case 7:  return away;
+	default: return away + 180.f;
+	}
+}
+
+// air candidate table ( reference = velocity yaw ), ordered by likelihood.
+float Resolver::CandidateAir( float ref, int slot ) {
+	switch( slot ) {
+	case 0:  return ref + 180.f;
+	case 1:  return ref - 90.f;
+	case 2:  return ref + 90.f;
+	case 3:  return ref - 135.f;
+	case 4:  return ref + 135.f;
+	case 5:  return ref - 150.f;
+	case 6:  return ref + 150.f;
+	case 7:  return ref - 45.f;
+	case 8:  return ref + 45.f;
+	default: return ref + 180.f;
+	}
+}
+
+void Resolver::ResolverFeedback( AimPlayer* data, LagRecord* record, bool hit, bool head ) {
+	// pick the score table that matches the mode the record was resolved with.
+	float* scores = nullptr;
+	int    n      = 0;
+
+	switch( record->m_mode ) {
+	case Modes::RESOLVE_STAND:
+	case Modes::RESOLVE_STAND1:
+	case Modes::RESOLVE_STAND2:
+		scores = data->m_stand_score;
+		n      = AimPlayer::STAND_SLOTS;
+		break;
+
+	case Modes::RESOLVE_AIR:
+		scores = data->m_air_score;
+		n      = AimPlayer::AIR_SLOTS;
+		break;
+
+	default:
+		// walk / body / stopped-moving reveal the real angle, nothing to learn.
+		break;
+	}
+
+	int idx = record->m_resolve_index;
+
+	if( scores && idx >= 0 && idx < n ) {
+		if( hit ) {
+			// reward harder for a headshot ( exact angle ) than a body hit.
+			scores[ idx ] += head ? 3.f : 1.5f;
+			data->m_missed_shots = 0;
+		}
+		else {
+			// wrong angle, push this slot down so the next-best is explored.
+			scores[ idx ] -= 1.f;
+			++data->m_missed_shots;
+		}
+
+		math::clamp( scores[ idx ], -10.f, 10.f );
+	}
+
+	// learn the pitch slot too ( zero / down / up ).
+	int pidx = record->m_pitch_idx;
+	if( pidx >= 0 && pidx < AimPlayer::PITCH_SLOTS ) {
+		data->m_pitch_score[ pidx ] += hit ? ( head ? 3.f : 1.f ) : -1.f;
+		math::clamp( data->m_pitch_score[ pidx ], -10.f, 10.f );
+	}
+}
+
 void Resolver::ResolvePitch( AimPlayer* data, LagRecord* record ) {
 	// the 3 pitches that fake-pitch anti-aims pin to: zero / fake-down / fake-up.
 	static const float pitches[ 3 ] = { 0.f, 89.f, -89.f };
@@ -149,11 +261,16 @@ void Resolver::ResolvePitch( AimPlayer* data, LagRecord* record ) {
 	bool faked = std::abs( record->m_eye_angles.x ) > 85.f;
 
 	// in matchmaking with a believable pitch, trust the networked value.
-	if( !nospread && !faked )
+	if( !nospread && !faked ) {
+		// mark as not bruteforced so feedback won't touch a pitch slot.
+		record->m_pitch_idx = -1;
 		return;
+	}
 
-	// bruteforce the 3 possible pitches, advanced by miss feedback.
-	record->m_eye_angles.x = pitches[ ( ( data->m_pitch_index % 3 ) + 3 ) % 3 ];
+	// learn which of the 3 pitches actually lands instead of cycling.
+	int slot = SelectSlot( data->m_pitch_score, AimPlayer::PITCH_SLOTS );
+	record->m_pitch_idx    = slot;
+	record->m_eye_angles.x = pitches[ slot ];
 }
 
 bool Resolver::DetectRotation( AimPlayer* data, LagRecord* record, float& predicted ) {
@@ -289,9 +406,14 @@ void Resolver::ResolveWalk( AimPlayer* data, LagRecord* record ) {
 	// store the away angle for server-feedback learning.
 	record->m_away = GetAwayAngle( record );
 
-	// copy the last record that this player was walking
-	// we need it later on because it gives us crucial data.
-	std::memcpy( &data->m_walk_record, record, sizeof( LagRecord ) );
+	// remember just the fields we need from the last walking record. a full
+	// memcpy would alias this record's bone buffer pointer and double-free it
+	// when either record is destroyed.
+	data->m_walk_record.m_sim_time      = record->m_sim_time;
+	data->m_walk_record.m_anim_time     = record->m_anim_time;
+	data->m_walk_record.m_body          = record->m_body;
+	data->m_walk_record.m_origin        = record->m_origin;
+	data->m_walk_record.m_anim_velocity = record->m_anim_velocity;
 }
 
 void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
@@ -380,45 +502,15 @@ void Resolver::ResolveStand( AimPlayer* data, LagRecord* record ) {
 	int   side = ( seed >= 0.f ) ? 1 : -1;
 	data->m_side = side;
 
-	// shared brute index for stand1 ( known move ) and stand2 ( no move ).
-	int idx = ( record->m_mode == Modes::RESOLVE_STAND1 )
-		? data->m_stand_index : data->m_stand_index2;
+	// learning resolver: pick the candidate slot that has landed the most for
+	// this player instead of cycling blindly. mm uses the first 6 candidates.
+	int slot = SelectSlot( data->m_stand_score, 6 );
 
-	// desync / side bruteforce ordered by likelihood.
-	switch( idx % 6 ) {
-	case 0:
-		// seeded side at max desync.
-		record->m_eye_angles.y = base + side * maxdesync;
-		break;
+	// remember which slot we resolved with so hit / miss feedback rewards or
+	// penalizes the right candidate.
+	record->m_resolve_index = slot;
 
-	case 1:
-		// opposite side at max desync.
-		record->m_eye_angles.y = base - side * maxdesync;
-		break;
-
-	case 2:
-		// zero desync ( facing the lby ).
-		record->m_eye_angles.y = base;
-		break;
-
-	case 3:
-		// flipped lby ( switched after stopping ).
-		record->m_eye_angles.y = base + 180.f;
-		break;
-
-	case 4:
-		// away-based backwards.
-		record->m_eye_angles.y = away + 180.f;
-		break;
-
-	case 5:
-		// straight at us.
-		record->m_eye_angles.y = away;
-		break;
-
-	default:
-		break;
-	}
+	record->m_eye_angles.y = CandidateStand( base, maxdesync, away, side, slot );
 }
 
 void Resolver::StandNS( AimPlayer* data, LagRecord* record ) {
@@ -426,39 +518,12 @@ void Resolver::StandNS( AimPlayer* data, LagRecord* record ) {
 	float away = GetAwayAngle( record );
 	record->m_away = away;
 
-	switch( data->m_shots % 8 ) {
-	case 0:
-		record->m_eye_angles.y = away + 180.f;
-		break;
+	// learning resolver: nospread uses all 8 candidate slots, picked by score
+	// instead of cycling on shot count.
+	int slot = SelectSlot( data->m_stand_score, AimPlayer::STAND_SLOTS );
+	record->m_resolve_index = slot;
 
-	case 1:
-		record->m_eye_angles.y = away + 90.f;
-		break;
-	case 2:
-		record->m_eye_angles.y = away - 90.f;
-		break;
-
-	case 3:
-		record->m_eye_angles.y = away + 45.f;
-		break;
-	case 4:
-		record->m_eye_angles.y = away - 45.f;
-		break;
-
-	case 5:
-		record->m_eye_angles.y = away + 135.f;
-		break;
-	case 6:
-		record->m_eye_angles.y = away - 135.f;
-		break;
-
-	case 7:
-		record->m_eye_angles.y = away + 0.f;
-		break;
-
-	default:
-		break;
-	}
+	record->m_eye_angles.y = CandidateStandNS( away, slot );
 
 	// force LBY to not fuck any pose and do a true bruteforce.
 	record->m_body = record->m_eye_angles.y;
@@ -502,19 +567,12 @@ void Resolver::ResolveAir( AimPlayer* data, LagRecord* record ) {
 		return;
 	}
 
-	switch( data->m_shots % 3 ) {
-	case 0:
-		record->m_eye_angles.y = velyaw + 180.f;
-		break;
+	// learning resolver: pick the best air candidate by score. mm uses the
+	// first 3 candidates ( back / left / right ).
+	int slot = SelectSlot( data->m_air_score, 3 );
+	record->m_resolve_index = slot;
 
-	case 1:
-		record->m_eye_angles.y = velyaw - 90.f;
-		break;
-
-	case 2:
-		record->m_eye_angles.y = velyaw + 90.f;
-		break;
-	}
+	record->m_eye_angles.y = CandidateAir( velyaw, slot );
 }
 
 void Resolver::AirNS( AimPlayer* data, LagRecord* record ) {
@@ -522,42 +580,12 @@ void Resolver::AirNS( AimPlayer* data, LagRecord* record ) {
 	float away = GetAwayAngle( record );
 	record->m_away = away;
 
-	switch( data->m_shots % 9 ) {
-	case 0:
-		record->m_eye_angles.y = away + 180.f;
-		break;
+	// learning resolver: nospread air uses all 9 candidate slots picked by
+	// score instead of cycling on shot count.
+	int slot = SelectSlot( data->m_air_score, AimPlayer::AIR_SLOTS );
+	record->m_resolve_index = slot;
 
-	case 1:
-		record->m_eye_angles.y = away + 150.f;
-		break;
-	case 2:
-		record->m_eye_angles.y = away - 150.f;
-		break;
-
-	case 3:
-		record->m_eye_angles.y = away + 165.f;
-		break;
-	case 4:
-		record->m_eye_angles.y = away - 165.f;
-		break;
-
-	case 5:
-		record->m_eye_angles.y = away + 135.f;
-		break;
-	case 6:
-		record->m_eye_angles.y = away - 135.f;
-		break;
-
-	case 7:
-		record->m_eye_angles.y = away + 90.f;
-		break;
-	case 8:
-		record->m_eye_angles.y = away - 90.f;
-		break;
-
-	default:
-		break;
-	}
+	record->m_eye_angles.y = CandidateAir( away, slot );
 }
 
 void Resolver::ResolvePoses( Player* player, LagRecord* record ) {

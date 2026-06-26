@@ -172,6 +172,7 @@
     <ClInclude Include="matrix.h" />
     <ClInclude Include="memalloc.h" />
     <ClInclude Include="menu.h" />
+    <ClInclude Include="imgui_menu.h" />
     <ClInclude Include="modules.h" />
     <ClInclude Include="movement.h" />
     <ClInclude Include="multidropdown.h" />
@@ -266,6 +267,14 @@
     <ClCompile Include="slider.cpp" />
     <ClCompile Include="visuals.cpp" />
     <ClCompile Include="wndproc.cpp" />
+    <ClCompile Include="d3d9.cpp" />
+    <ClCompile Include="imgui_menu.cpp" />
+    <ClCompile Include="imgui\imgui.cpp" />
+    <ClCompile Include="imgui\imgui_draw.cpp" />
+    <ClCompile Include="imgui\imgui_tables.cpp" />
+    <ClCompile Include="imgui\imgui_widgets.cpp" />
+    <ClCompile Include="imgui\imgui_impl_dx9.cpp" />
+    <ClCompile Include="imgui\imgui_impl_win32.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

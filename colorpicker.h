@@ -5,6 +5,7 @@
 #define COLORPICKER_PICKER_SIZE 256
 
 class Colorpicker : public Element {
+	friend class ImGuiMenu;
 public:
 	__forceinline Colorpicker( ) : m_open{ false }, m_label{}, m_color{}, m_ptr{ nullptr } {
 		m_flags     = ElementFlags::DRAW | ElementFlags::CLICK | ElementFlags::ACTIVE | ElementFlags::SAVE | ElementFlags::DEACIVATE;

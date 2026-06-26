@@ -3,6 +3,7 @@
 #define CHECKBOX_SIZE 8
 
 class Checkbox : public Element {
+	friend class ImGuiMenu;
 public:
 	// ctor.
 	__forceinline Checkbox( ) : m_checked{ false }, m_label{} {

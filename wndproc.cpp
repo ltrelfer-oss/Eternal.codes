@@ -1,6 +1,20 @@
 #include "includes.h"
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_win32.h"
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam );
+extern bool g_imgui_initialized;
 
 LRESULT WINAPI Hooks::WndProc( HWND wnd, uint32_t msg, WPARAM wp, LPARAM lp ) {
+	// feed input to imgui + swallow it while the menu is open.
+	if ( g_imgui_initialized && g_gui.m_open ) {
+		ImGui_ImplWin32_WndProcHandler( wnd, msg, wp, lp );
+
+		// block game input (except move so we can be unstuck) while menu is up.
+		if ( msg != WM_KEYUP && msg != WM_SYSKEYUP )
+			return TRUE;
+	}
+
 	switch( msg ) {
 	case WM_LBUTTONDOWN:
 		g_input.SetDown( VK_LBUTTON );

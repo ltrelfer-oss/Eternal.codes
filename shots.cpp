@@ -182,18 +182,10 @@ void Shots::OnImpact( IGameEvent *evt ) {
 		if ( mode == Resolver::Modes::RESOLVE_BODY )
 			++data->m_body_index;
 
-		// stand and stand1 ( known last move ) share the brute index.
-		else if ( mode == Resolver::Modes::RESOLVE_STAND
-			|| mode == Resolver::Modes::RESOLVE_STAND1 )
-			++data->m_stand_index;
-
-		else if ( mode == Resolver::Modes::RESOLVE_STAND2 )
-			++data->m_stand_index2;
-
-		// advance the pitch bruteforce ( zero / down / up ) on a wrong-angle miss.
-		++data->m_pitch_index;
-
-		++data->m_missed_shots;
+		// learning resolver: penalize the exact candidate slot ( yaw + pitch )
+		// this record was resolved with so the next-best one is explored, and
+		// bump the missed-shots counter. replaces the old blind index cycling.
+		g_resolver.ResolverFeedback( data, shot->m_record, false, false );
 	}
 
 	// restore player to his original state.
@@ -329,12 +321,9 @@ void Shots::OnHurt( IGameEvent *evt ) {
 	if ( mode == Resolver::Modes::RESOLVE_BODY && data->m_body_index > 0 )
 		--data->m_body_index;
 
-	else if ( ( mode == Resolver::Modes::RESOLVE_STAND
-		|| mode == Resolver::Modes::RESOLVE_STAND1 ) && data->m_stand_index > 0 )
-		--data->m_stand_index;
-
-	else if ( mode == Resolver::Modes::RESOLVE_STAND2 && data->m_stand_index2 > 0 )
-		--data->m_stand_index2;
+	// learning resolver: reward the candidate slot that landed this hit so the
+	// resolver converges on it. a headshot is the strongest signal.
+	g_resolver.ResolverFeedback( data, impact->m_shot->m_record, true, group == HITGROUP_HEAD );
 
 	// if we hit head, learn the angle that worked ( server-based resolving ).
 	// the offset is stored relative to the reference angle for that mode so it

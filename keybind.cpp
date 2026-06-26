@@ -1,6 +1,6 @@
 #include "includes.h"
 
-const std::string keynames[] = {
+const std::string keynames[ 256 ] = {
 	"", XOR( "mouse1" ), XOR( "mouse2" ), XOR( "cancel" ), XOR( "mouse3" ), XOR( "mouse4" ), XOR( "mouse5" ), XOR( "[7]" ),
 	XOR( "backspace" ), XOR( "tab" ), XOR( "[10]" ), XOR( "[11]" ), XOR( "num 5" ), XOR( "enter" ), XOR( "[14]" ), XOR( "[15]" ), XOR( "shift" ),
 	XOR( "ctrl" ), XOR( "alt" ), XOR( "[19]" ), XOR( "capslock" ), XOR( "[21]" ), XOR( "[22]" ), XOR( "[23]" ), XOR( "[24]" ), XOR( "[25]" ),
@@ -27,6 +27,16 @@ const std::string keynames[] = {
 	XOR( "[238]" ), XOR( "[239]" ), XOR( "[240]" ), XOR( "left win" ), XOR( "[242]" ), XOR( "[243]" ), XOR( "[244]" ), XOR( "[245]" ), XOR( "[246]" ), XOR( "[247]" ),
 	XOR( "[248]" ), XOR( "application" ), XOR( "[250]" ), XOR( "[251]" ), XOR( "[252]" ), XOR( "[253]" )
 };;
+
+// accessor so other translation units can read a key name without taking a
+// cross-TU dependency on the raw array symbol ( whose mangling differs under
+// LTCG between an unbounded extern and the sized definition ).
+const std::string& key_name( int key ) {
+	static const std::string none{ };
+	if( key < 0 || key >= 256 )
+		return none;
+	return keynames[ key ];
+}
 
 void Keybind::draw( ) {
 	Rect  area{ m_parent->GetElementsRect( ) };

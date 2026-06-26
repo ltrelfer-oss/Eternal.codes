@@ -2,6 +2,7 @@
 
 class Form {
 	friend class GUI;
+	friend class ImGuiMenu;
 	friend class Element;
 	friend class Dropdown;
 	friend class MultiDropdown;

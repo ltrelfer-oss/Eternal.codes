@@ -6,6 +6,7 @@
 
 class Button : public Element {
 	friend class GUI;
+	friend class ImGuiMenu;
 
 public:
 	__forceinline Button( ) : m_label{} {

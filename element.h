@@ -35,6 +35,7 @@ class Element {
 	friend class Tab;
 	friend class Form;
 	friend class Config;
+	friend class ImGuiMenu;
 
 protected:
 	using ShowCallback_t = bool( *)( );
@@ -48,6 +49,7 @@ protected:
 	size_t                        m_col;
 	Form*                         m_parent;
 	std::string                   m_label;
+	std::string                   m_tooltip;
 	std::string                   m_file_id;
 	size_t                        m_flags;
 	size_t                        m_type;
@@ -80,6 +82,10 @@ public:
 
 	__forceinline void SetCallback( Callback_t cb ) {
 		m_callback = cb;
+	}
+
+	__forceinline void SetTooltip( const std::string &tooltip ) {
+		m_tooltip = tooltip;
 	}
 
 	__forceinline void SetPosition( int x, int y ) {
