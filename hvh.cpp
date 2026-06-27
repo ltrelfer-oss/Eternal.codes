@@ -34,138 +34,129 @@ void HVH::AntiAimPitch( ) {
 		IdealPitch( );
 		break;
 
-	case 5:
-		// zero.
-		g_cl.m_cmd->m_view_angles.x = 0.f;
-		break;
-
-	case 6: {
-		// jitter ( alternate up / down each tick ).
-		bool up = ( ( int )std::floor( g_csgo.m_globals->m_curtime / g_csgo.m_globals->m_interval ) & 1 ) != 0;
-		float down_pitch = safe ? 89.f : 720.f;
-		float up_pitch = safe ? -89.f : -720.f;
-		g_cl.m_cmd->m_view_angles.x = up ? up_pitch : down_pitch;
-		break;
-	}
-
 	default:
 		break;
 	}
 }
 
-void HVH::ResetAutoDirectionData( ) {
-	m_damage_records.clear( );
-	m_hit_history.clear( );
-	m_has_smoothed_yaw = false;
-	m_smoothed_yaw = 0.f;
-	m_auto_dist = 0.f;
-}
-
-void HVH::RecordDamage( float damage, float yaw ) {
-	// ignore invalid data.
-	if( damage <= 0.f )
-		return;
-
-	float now = g_csgo.m_globals->m_curtime;
-
-	// normalize yaw and store.
-	float norm_yaw = math::NormalizedAngle( yaw );
-
-	m_damage_records.push_back( { now, damage, norm_yaw } );
-	m_hit_history.push_back( { now, norm_yaw } );
-
-	// trim old data.
-	constexpr float HISTORY_WINDOW{ 8.f };
-	while( !m_damage_records.empty( ) && ( now - m_damage_records.front( ).m_time ) > HISTORY_WINDOW )
-		m_damage_records.pop_front( );
-
-	while( !m_hit_history.empty( ) && ( now - m_hit_history.front( ).m_time ) > HISTORY_WINDOW )
-		m_hit_history.pop_front( );
-}
-
 void HVH::AutoDirection( ) {
-	constexpr float HISTORY_WINDOW{ 8.f };
-	constexpr float TREND_WINDOW{ 4.f };
-	constexpr float MIN_CONFIDENCE{ 0.01f };
+	// constants.
+	constexpr float STEP{ 4.f };
+	constexpr float RANGE{ 32.f };
 
-	const float now = g_csgo.m_globals->m_curtime;
+	// best target.
+	struct AutoTarget_t { float fov; Player *player; };
+	AutoTarget_t target{ 180.f + 1.f, nullptr };
 
-	// keep records inside window.
-	while( !m_damage_records.empty( ) && ( now - m_damage_records.front( ).m_time ) > HISTORY_WINDOW )
-		m_damage_records.pop_front( );
+	// iterate players.
+	for( int i{ 1 }; i <= g_csgo.m_globals->m_max_clients; ++i ) {
+		Player *player = g_csgo.m_entlist->GetClientEntity< Player * >( i );
 
-	while( !m_hit_history.empty( ) && ( now - m_hit_history.front( ).m_time ) > HISTORY_WINDOW )
-		m_hit_history.pop_front( );
-
-	// nothing to base on, fallback.
-	if( m_damage_records.empty( ) && m_hit_history.empty( ) ) {
-		// honor timeout to avoid jitter.
-		if( m_auto_last > 0.f && m_auto_time > 0.f && now < ( m_auto_last + m_auto_time ) )
-			return;
-
-		m_auto = math::NormalizedAngle( m_view - 180.f );
-		m_auto_dist = 0.f;
-		m_has_smoothed_yaw = false;
-		return;
-	}
-
-	float sin_sum{ }, cos_sum{ }, weight_sum{ };
-
-	// weighted circular mean using damage and recency.
-	for( const auto &rec : m_damage_records ) {
-		float age = now - rec.m_time;
-		if( age > HISTORY_WINDOW )
+		// validate player.
+		if( !g_aimbot.IsValidTarget( player ) )
 			continue;
 
-		float recency = std::max( 0.f, 1.f - ( age / HISTORY_WINDOW ) );
-		float dmg_weight = std::max( 1.f, rec.m_damage );
-		float weight = recency * dmg_weight;
+		// skip dormant players.
+		if( player->dormant( ) )
+			continue;
 
-		const float rad = math::deg_to_rad( rec.m_yaw );
-		sin_sum += std::sin( rad ) * weight;
-		cos_sum += std::cos( rad ) * weight;
-		weight_sum += weight;
-	}
+		// get best target based on fov.
+		float fov = math::GetFOV( g_cl.m_view_angles, g_cl.m_shoot_pos, player->WorldSpaceCenter( ) );
 
-	if( weight_sum <= MIN_CONFIDENCE ) {
-		m_auto = math::NormalizedAngle( m_view - 180.f );
-		m_auto_dist = 0.f;
-		m_has_smoothed_yaw = false;
-		return;
-	}
-
-	float weighted_yaw = math::rad_to_deg( std::atan2( sin_sum / weight_sum, cos_sum / weight_sum ) );
-	math::NormalizeAngle( weighted_yaw );
-
-	// evaluate directional trend based on history.
-	float trend_adjust{ };
-	float trend_weight{ };
-	if( m_hit_history.size( ) >= 2 ) {
-		for( size_t i{ 1u }; i < m_hit_history.size( ); ++i ) {
-			const auto &prev = m_hit_history[ i - 1 ];
-			const auto &cur = m_hit_history[ i ];
-
-			float delta = math::NormalizedAngle( cur.m_yaw - prev.m_yaw );
-			float age = now - cur.m_time;
-			float weight = std::max( 0.f, 1.f - ( age / TREND_WINDOW ) );
-
-			trend_adjust += delta * weight;
-			trend_weight += weight;
+		if( fov < target.fov ) {
+			target.fov = fov;
+			target.player = player;
 		}
 	}
 
-	if( trend_weight > 0.001f ) {
-		trend_adjust /= trend_weight;
-		// clamp trend influence.
-		math::NormalizeAngle( trend_adjust );
-		trend_adjust = std::clamp( trend_adjust, -45.f, 45.f );
-	}
-	else trend_adjust = 0.f;
+	if( !target.player ) {
+		// we have a timeout.
+		if( m_auto_last > 0.f && m_auto_time > 0.f && g_csgo.m_globals->m_curtime < ( m_auto_last + m_auto_time ) )
+			return;
 
-	auto blend_angle = [ ]( float from, float to, float t ) {
-		float diff = math::NormalizedAngle( to - from );
-		return math::NormalizedAngle( from + diff * t );
-	};
+		// set angle to backwards.
+		m_auto = math::NormalizedAngle( m_view - 180.f );
+		m_auto_dist = -1.f;
+		return;
+	}
+
+	/*
+	* data struct
+	* 68 74 74 70 73 3a 2f 2f 73 74 65 61 6d 63 6f 6d 6d 75 6e 69 74 79 2e 63 6f 6d 2f 69 64 2f 73 69 6d 70 6c 65 72 65 61 6c 69 73 74 69 63 2f
+	*/
+
+	// construct vector of angles to test.
+	std::vector< AdaptiveAngle > angles{ };
+	angles.emplace_back( m_view - 180.f );
+	angles.emplace_back( m_view + 90.f );
+	angles.emplace_back( m_view - 90.f );
+
+	// start the trace at the enemy shoot pos.
+	vec3_t start = target.player->GetShootPosition( );
+
+	// see if we got any valid result.
+	// if this is false the path was not obstructed with anything.
+	bool valid{ false };
+
+	// iterate vector of angles.
+	for( auto it = angles.begin( ); it != angles.end( ); ++it ) {
+
+		// compute the 'rough' estimation of where our head will be.
+		vec3_t end{ g_cl.m_shoot_pos.x + std::cos( math::deg_to_rad( it->m_yaw ) ) * RANGE,
+			g_cl.m_shoot_pos.y + std::sin( math::deg_to_rad( it->m_yaw ) ) * RANGE,
+			g_cl.m_shoot_pos.z };
+
+		// draw a line for debugging purposes.
+		//g_csgo.m_debug_overlay->AddLineOverlay( start, end, 255, 0, 0, true, 0.1f );
+
+		// compute the direction.
+		vec3_t dir = end - start;
+		float len = dir.normalize( );
+
+		// should never happen.
+		if( len <= 0.f )
+			continue;
+
+		// step thru the total distance, 4 units per step.
+		for( float i{ 0.f }; i < len; i += STEP ) {
+			// get the current step position.
+			vec3_t point = start + ( dir * i );
+
+			// get the contents at this point.
+			int contents = g_csgo.m_engine_trace->GetPointContents( point, MASK_SHOT_HULL );
+
+			// contains nothing that can stop a bullet.
+			if( !( contents & MASK_SHOT_HULL ) )
+				continue;
+
+			float mult = 1.f;
+
+			// over 50% of the total length, prioritize this shit.
+			if( i > ( len * 0.5f ) )
+				mult = 1.25f;
+
+			// over 90% of the total length, prioritize this shit.
+			if( i > ( len * 0.75f ) )
+				mult = 1.25f;
+
+			// over 90% of the total length, prioritize this shit.
+			if( i > ( len * 0.9f ) )
+				mult = 2.f;
+
+			// append 'penetrated distance'.
+			it->m_dist += ( STEP * mult );
+
+			// mark that we found anything.
+			valid = true;
+		}
+	}
+
+	if( !valid ) {
+		// set angle to backwards.
+		m_auto = math::NormalizedAngle( m_view - 180.f );
+		m_auto_dist = -1.f;
+		return;
+	}
 
 	// weighted_yaw points away from the incoming fire; the threat itself sits on the opposite side.
 	const float threat_yaw = math::NormalizedAngle( weighted_yaw + 180.f );
@@ -552,32 +543,9 @@ void HVH::DoRealAntiAim( ) {
 				g_cl.m_cmd->m_view_angles.y = m_random_angle;
 				break;
 
-				  // spin.
-			case 5:
-				// full 360 spin, speed driven independently of any range.
-				g_cl.m_cmd->m_view_angles.y = std::fmod( g_csgo.m_globals->m_curtime * ( m_rot_speed * 36.f ), 360.f ) - 180.f;
-				break;
-
-				  // sway ( smooth sine oscillation around direction ).
-			case 6:
-				g_cl.m_cmd->m_view_angles.y = m_direction + std::sin( g_csgo.m_globals->m_curtime * std::max( m_rot_speed, 0.1f ) ) * ( m_rot_range / 2.f );
-				break;
-
-				  // switch ( 2 way, alternate each tick ).
-			case 7: {
-				float half = m_jitter_range / 2.f;
-				bool right = ( ( int )std::floor( g_csgo.m_globals->m_curtime / g_csgo.m_globals->m_interval ) & 1 ) != 0;
-				g_cl.m_cmd->m_view_angles.y = m_direction + ( right ? half : -half );
-				break;
-			}
-
 			default:
 				break;
 			}
-
-			// apply a static yaw offset on top of the selected mode.
-			if( m_yaw_offset != 0.f )
-				g_cl.m_cmd->m_view_angles.y += m_yaw_offset;
 		}
 	}
 
@@ -721,7 +689,6 @@ void HVH::AntiAim( ) {
 		m_rand_update = g_menu.main.antiaim.rand_update_stand.get( );
 		m_dir = g_menu.main.antiaim.dir_stand.get( );
 		m_dir_custom = g_menu.main.antiaim.dir_custom_stand.get( );
-		m_yaw_offset = g_menu.main.antiaim.yaw_offset_stand.get( );
 		m_base_angle = g_menu.main.antiaim.base_angle_stand.get( );
 		m_auto_time = g_menu.main.antiaim.dir_time_stand.get( );
 		m_fake_yaw = g_menu.main.antiaim.fake_yaw_stand.get( );
@@ -738,7 +705,6 @@ void HVH::AntiAim( ) {
 		m_rand_update = g_menu.main.antiaim.rand_update_walk.get( );
 		m_dir = g_menu.main.antiaim.dir_walk.get( );
 		m_dir_custom = g_menu.main.antiaim.dir_custom_walk.get( );
-		m_yaw_offset = g_menu.main.antiaim.yaw_offset_walk.get( );
 		m_base_angle = g_menu.main.antiaim.base_angle_walk.get( );
 		m_auto_time = g_menu.main.antiaim.dir_time_walk.get( );
 		m_fake_yaw = g_menu.main.antiaim.fake_yaw_walk.get( );
@@ -755,7 +721,6 @@ void HVH::AntiAim( ) {
 		m_rand_update = g_menu.main.antiaim.rand_update_air.get( );
 		m_dir = g_menu.main.antiaim.dir_air.get( );
 		m_dir_custom = g_menu.main.antiaim.dir_custom_air.get( );
-		m_yaw_offset = g_menu.main.antiaim.yaw_offset_air.get( );
 		m_base_angle = g_menu.main.antiaim.base_angle_air.get( );
 		m_auto_time = g_menu.main.antiaim.dir_time_air.get( );
 		m_fake_yaw = g_menu.main.antiaim.fake_yaw_air.get( );
@@ -836,12 +801,6 @@ void HVH::SendPacket( ) {
 				active = true;
 				break;
 			}
-
-			// stand ( while standing still ).
-			else if( *it == 3 && g_cl.m_speed <= 0.1f && ( g_cl.m_flags & FL_ONGROUND ) ) {
-				active = true;
-				break;
-			}
 		}
 
 		if( active ) {
@@ -875,12 +834,6 @@ void HVH::SendPacket( ) {
 
 				// max.
 				else *g_cl.m_packet = false;
-			}
-
-			// adaptive ( choke harder the faster we move ).
-			else if( mode == 4 ) {
-				if( g_cl.m_speed > 130.f || delta <= 4096.f )
-					*g_cl.m_packet = false;
 			}
 
 			if( g_cl.m_lag >= limit )
