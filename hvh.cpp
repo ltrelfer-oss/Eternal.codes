@@ -158,22 +158,35 @@ void HVH::AutoDirection( ) {
 		return;
 	}
 
-	// put the most distance at the front of the container.
-	std::sort( angles.begin( ), angles.end( ),
-		[ ] ( const AdaptiveAngle &a, const AdaptiveAngle &b ) {
-		return a.m_dist > b.m_dist;
-	} );
+	// weighted_yaw points away from the incoming fire; the threat itself sits on the opposite side.
+	const float threat_yaw = math::NormalizedAngle( weighted_yaw + 180.f );
 
-	// the best angle should be at the front now.
-	AdaptiveAngle *best = &angles.front( );
+	float candidate = math::NormalizedAngle( weighted_yaw + trend_adjust );
 
-	// check if we are not doing a useless change.
-	if( best->m_dist != m_auto_dist ) {
-		// set yaw to the best result.
-		m_auto = math::NormalizedAngle( best->m_yaw );
-		m_auto_dist = best->m_dist;
-		m_auto_last = g_csgo.m_globals->m_curtime;
+	// auto direction drives the REAL yaw, so the trend must never rotate the head
+	// into the hemisphere facing incoming fire. keep the real at least 90 deg off
+	// the live threat, clamping any toward-threat rotation back to the safe edge.
+	float threat_off = math::NormalizedAngle( candidate - threat_yaw );
+	if( std::abs( threat_off ) < 90.f )
+		candidate = math::NormalizedAngle( threat_yaw + ( threat_off >= 0.f ? 90.f : -90.f ) );
+
+	// smooth noisy data but keep responsiveness proportional to confidence.
+	float smooth_factor = std::clamp( weight_sum / 120.f, 0.15f, 0.65f );
+	if( !m_has_smoothed_yaw ) {
+		m_smoothed_yaw = candidate;
+		m_has_smoothed_yaw = true;
 	}
+	else m_smoothed_yaw = blend_angle( m_smoothed_yaw, candidate, smooth_factor );
+
+	// smoothing can drift the real back toward the threat; re-clamp to the safe hemisphere.
+	float smoothed_off = math::NormalizedAngle( m_smoothed_yaw - threat_yaw );
+	if( std::abs( smoothed_off ) < 90.f )
+		m_smoothed_yaw = math::NormalizedAngle( threat_yaw + ( smoothed_off >= 0.f ? 90.f : -90.f ) );
+
+	// final recommended real direction (kept away from the threat).
+	m_auto = m_smoothed_yaw;
+	m_auto_dist = weight_sum;
+	m_auto_last = now;
 }
 
 void HVH::GetAntiAimDirection( ) {
@@ -548,43 +561,34 @@ void HVH::DoFakeAntiAim( ) {
 	// the fake became the real, think this fixed it.
 	*g_cl.m_packet = true;
 
-	switch( g_menu.main.antiaim.fake_yaw.get( ) ) {
+	// opposite of the real direction is the base for every believable fake.
+	const float opposite = m_direction + 180.f;
 
-		// default.
+	switch( m_fake_yaw ) {
+
+		// default ( opposite with a small believable micro-jitter ).
 	case 1:
-		// set base to opposite of direction.
-		g_cl.m_cmd->m_view_angles.y = m_direction + 180.f;
-
-		// apply 45 degree jitter.
-		g_cl.m_cmd->m_view_angles.y += g_csgo.RandomFloat( -90.f, 90.f );
+		g_cl.m_cmd->m_view_angles.y = opposite + g_csgo.RandomFloat( -20.f, 20.f );
 		break;
 
 		// relative.
 	case 2:
-		// set base to opposite of direction.
-		g_cl.m_cmd->m_view_angles.y = m_direction + 180.f;
-
-		// apply offset correction.
-		g_cl.m_cmd->m_view_angles.y += g_menu.main.antiaim.fake_relative.get( );
+		g_cl.m_cmd->m_view_angles.y = opposite + m_fake_relative;
 		break;
 
 		// relative jitter.
 	case 3: {
-		// get fake jitter range from menu.
-		float range = g_menu.main.antiaim.fake_jitter_range.get( ) / 2.f;
-
-		// set base to opposite of direction.
-		g_cl.m_cmd->m_view_angles.y = m_direction + 180.f;
-
-		// apply jitter.
-		g_cl.m_cmd->m_view_angles.y += g_csgo.RandomFloat( -range, range );
+		float range = m_fake_jitter / 2.f;
+		g_cl.m_cmd->m_view_angles.y = opposite + g_csgo.RandomFloat( -range, range );
 		break;
 	}
 
-		  // rotate.
-	case 4:
-		g_cl.m_cmd->m_view_angles.y = m_direction + 90.f + std::fmod( g_csgo.m_globals->m_curtime * 360.f, 180.f );
+		  // rotate ( smooth sweep around the opposite, range driven ).
+	case 4: {
+		float range = m_fake_jitter > 0.f ? m_fake_jitter : 120.f;
+		g_cl.m_cmd->m_view_angles.y = opposite - range / 2.f + std::fmod( g_csgo.m_globals->m_curtime * 180.f, range );
 		break;
+	}
 
 		// random.
 	case 5:
@@ -595,6 +599,39 @@ void HVH::DoFakeAntiAim( ) {
 	case 6:
 		g_cl.m_cmd->m_view_angles.y = g_cl.m_view_angles.y;
 		break;
+
+		// opposite ( clean, no jitter ).
+	case 7:
+		g_cl.m_cmd->m_view_angles.y = opposite;
+		break;
+
+		// sway ( smooth oscillation behind the real, amplitude driven ).
+	case 8: {
+		float amp = m_fake_jitter > 0.f ? m_fake_jitter : 60.f;
+		g_cl.m_cmd->m_view_angles.y = opposite + std::sin( g_csgo.m_globals->m_curtime * 6.f ) * amp;
+		break;
+	}
+
+		// 3-way ( cycle left / center / right of opposite each choked tick ).
+	case 9: {
+		float range = m_fake_jitter > 0.f ? m_fake_jitter : 60.f;
+		int   phase = ( int )std::floor( g_csgo.m_globals->m_curtime / std::max( g_csgo.m_globals->m_interval, 0.001f ) ) % 3;
+		g_cl.m_cmd->m_view_angles.y = opposite + ( phase == 0 ? -range : ( phase == 1 ? 0.f : range ) );
+		break;
+	}
+
+		// spin ( continuous 360 ).
+	case 10:
+		g_cl.m_cmd->m_view_angles.y = std::fmod( g_csgo.m_globals->m_curtime * 360.f, 360.f ) - 180.f;
+		break;
+
+		// switch ( 2-way alternate each tick around opposite ).
+	case 11: {
+		float half = ( m_fake_jitter > 0.f ? m_fake_jitter : 60.f ) / 2.f;
+		bool  right = ( ( int )std::floor( g_csgo.m_globals->m_curtime / std::max( g_csgo.m_globals->m_interval, 0.001f ) ) & 1 ) != 0;
+		g_cl.m_cmd->m_view_angles.y = opposite + ( right ? half : -half );
+		break;
+	}
 
 	default:
 		break;
@@ -654,6 +691,9 @@ void HVH::AntiAim( ) {
 		m_dir_custom = g_menu.main.antiaim.dir_custom_stand.get( );
 		m_base_angle = g_menu.main.antiaim.base_angle_stand.get( );
 		m_auto_time = g_menu.main.antiaim.dir_time_stand.get( );
+		m_fake_yaw = g_menu.main.antiaim.fake_yaw_stand.get( );
+		m_fake_relative = g_menu.main.antiaim.fake_relative_stand.get( );
+		m_fake_jitter = g_menu.main.antiaim.fake_jitter_stand.get( );
 	}
 
 	else if( m_mode == AntiAimMode::WALK ) {
@@ -667,6 +707,9 @@ void HVH::AntiAim( ) {
 		m_dir_custom = g_menu.main.antiaim.dir_custom_walk.get( );
 		m_base_angle = g_menu.main.antiaim.base_angle_walk.get( );
 		m_auto_time = g_menu.main.antiaim.dir_time_walk.get( );
+		m_fake_yaw = g_menu.main.antiaim.fake_yaw_walk.get( );
+		m_fake_relative = g_menu.main.antiaim.fake_relative_walk.get( );
+		m_fake_jitter = g_menu.main.antiaim.fake_jitter_walk.get( );
 	}
 
 	else if( m_mode == AntiAimMode::AIR ) {
@@ -680,6 +723,9 @@ void HVH::AntiAim( ) {
 		m_dir_custom = g_menu.main.antiaim.dir_custom_air.get( );
 		m_base_angle = g_menu.main.antiaim.base_angle_air.get( );
 		m_auto_time = g_menu.main.antiaim.dir_time_air.get( );
+		m_fake_yaw = g_menu.main.antiaim.fake_yaw_air.get( );
+		m_fake_relative = g_menu.main.antiaim.fake_relative_air.get( );
+		m_fake_jitter = g_menu.main.antiaim.fake_jitter_air.get( );
 	}
 
 	// set pitch.
@@ -692,10 +738,10 @@ void HVH::AntiAim( ) {
 	}
 
 	// we have no real, but we do have a fake.
-	else if( g_menu.main.antiaim.fake_yaw.get( ) > 0 )
+	else if( m_fake_yaw > 0 )
 		m_direction = g_cl.m_cmd->m_view_angles.y;
 
-	if( g_menu.main.antiaim.fake_yaw.get( ) ) {
+	if( m_fake_yaw > 0 ) {
 		// do not allow 2 consecutive sendpacket true if faking angles.
 		if( *g_cl.m_packet && g_cl.m_old_packet )
 			*g_cl.m_packet = false;
